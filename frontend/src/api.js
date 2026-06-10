@@ -25,9 +25,9 @@ async function apiCall(endpoint, options = {}) {
 export const api = {
   // Members
   getMembers: () => apiCall('/api/members'),
-  identifyMember: (userId) => apiCall('/api/members/identify', {
+  identifyMember: (authId, email, name) => apiCall('/api/members/identify', {
     method: 'POST',
-    body: JSON.stringify({ user_id: userId })
+    body: JSON.stringify({ auth_id: authId, email, name })
   }),
   updateMemberVibe: (id, updates) => apiCall(`/api/members/${id}/vibe`, {
     method: 'PATCH',

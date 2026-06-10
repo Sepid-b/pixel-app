@@ -1,13 +1,20 @@
 import React, { useState } from 'react';
 import { supabase } from './supabaseClient';
 
+const avatarColors = ['#7c6bf0', '#d4b3f5', '#5DCAA5', '#f0997b', '#e84393', '#3498db', '#f39c12', '#2ecc71'];
+
 export default function Login({ onLogin }) {
+  const [mode, setMode] = useState('signin'); // 'signin' or 'signup'
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [validationErrors, setValidationErrors] = useState({});
 
-  const handleLogin = async (e) => {
+  const handleSignIn = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
@@ -27,6 +34,91 @@ export default function Login({ onLogin }) {
       setLoading(false);
     }
   };
+
+  const handleSignUp = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    setValidationErrors({});
+
+    // Validation
+    const errors = {};
+    if (!name.trim()) {
+      errors.name = 'Name is required';
+    }
+    if (password.length < 8) {
+      errors.password = 'Password must be at least 8 characters';
+    }
+    if (password !== confirmPassword) {
+      errors.confirmPassword = 'Passwords do not match';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Create Supabase auth user
+      const { data, error: authError } = await supabase.auth.signUp({
+        email: email.toLowerCase(),
+        password,
+        options: {
+          data: {
+            full_name: name.trim()
+          }
+        }
+      });
+
+      if (authError) {
+        if (authError.message.includes('already registered')) {
+          throw new Error('An account with this email already exists');
+        }
+        throw authError;
+      }
+
+      // Get available avatar color
+      const { data: existingMembers } = await supabase
+        .from('px_members')
+        .select('avatar_color');
+
+      const usedColors = existingMembers?.map(m => m.avatar_color) || [];
+      const availableColor = avatarColors.find(c => !usedColors.includes(c)) || avatarColors[0];
+
+      // Create px_members row
+      const { error: memberError } = await supabase
+        .from('px_members')
+        .insert({
+          user_id: data.user.id,
+          name: name.trim(),
+          email: email.toLowerCase(),
+          avatar_color: availableColor,
+          role: 'member'
+        });
+
+      if (memberError) throw memberError;
+
+      // Show success and switch to sign in
+      setSuccess('Account created! You can now sign in.');
+      setName('');
+      setPassword('');
+      setConfirmPassword('');
+
+      setTimeout(() => {
+        setMode('signin');
+        setSuccess('');
+      }, 2000);
+
+    } catch (err) {
+      setError(err.message || 'Failed to create account');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isSignIn = mode === 'signin';
 
   return (
     <div style={{
@@ -78,10 +170,48 @@ export default function Login({ onLogin }) {
             color: '#a1a1aa',
             fontSize: '14px',
             margin: 0
-          }}>Sign in to your account</p>
+          }}>
+            {isSignIn ? 'Sign in to your account' : 'Create your account'}
+          </p>
         </div>
 
-        <form onSubmit={handleLogin}>
+        <form onSubmit={isSignIn ? handleSignIn : handleSignUp}>
+          {!isSignIn && (
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: '#fafafa',
+                marginBottom: '6px'
+              }}>
+                Full Name
+              </label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your full name"
+                required
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: '#18181b',
+                  border: `0.5px solid ${validationErrors.name ? '#ef4444' : '#3f3f46'}`,
+                  borderRadius: '4px',
+                  color: '#fafafa',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              />
+              {validationErrors.name && (
+                <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px' }}>
+                  {validationErrors.name}
+                </p>
+              )}
+            </div>
+          )}
+
           <div style={{ marginBottom: '16px' }}>
             <label style={{
               display: 'block',
@@ -110,7 +240,7 @@ export default function Login({ onLogin }) {
             />
           </div>
 
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: isSignIn ? '24px' : '16px' }}>
             <label style={{
               display: 'block',
               fontSize: '14px',
@@ -129,14 +259,54 @@ export default function Login({ onLogin }) {
                 width: '100%',
                 padding: '8px 12px',
                 background: '#18181b',
-                border: '0.5px solid #3f3f46',
+                border: `0.5px solid ${validationErrors.password ? '#ef4444' : '#3f3f46'}`,
                 borderRadius: '4px',
                 color: '#fafafa',
                 fontSize: '14px',
                 outline: 'none'
               }}
             />
+            {validationErrors.password && (
+              <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px' }}>
+                {validationErrors.password}
+              </p>
+            )}
           </div>
+
+          {!isSignIn && (
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '14px',
+                fontWeight: '500',
+                color: '#fafafa',
+                marginBottom: '6px'
+              }}>
+                Confirm Password
+              </label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: '#18181b',
+                  border: `0.5px solid ${validationErrors.confirmPassword ? '#ef4444' : '#3f3f46'}`,
+                  borderRadius: '4px',
+                  color: '#fafafa',
+                  fontSize: '14px',
+                  outline: 'none'
+                }}
+              />
+              {validationErrors.confirmPassword && (
+                <p style={{ color: '#ef4444', fontSize: '12px', marginTop: '4px' }}>
+                  {validationErrors.confirmPassword}
+                </p>
+              )}
+            </div>
+          )}
 
           {error && (
             <div style={{
@@ -149,6 +319,20 @@ export default function Login({ onLogin }) {
               marginBottom: '16px'
             }}>
               {error}
+            </div>
+          )}
+
+          {success && (
+            <div style={{
+              padding: '12px',
+              background: '#14532d',
+              border: '0.5px solid #166534',
+              borderRadius: '4px',
+              color: '#bbf7d0',
+              fontSize: '14px',
+              marginBottom: '16px'
+            }}>
+              {success}
             </div>
           )}
 
@@ -168,9 +352,30 @@ export default function Login({ onLogin }) {
               opacity: loading ? 0.7 : 1
             }}
           >
-            {loading ? 'Signing in...' : 'Sign in'}
+            {loading ? (isSignIn ? 'Signing in...' : 'Creating account...') : (isSignIn ? 'Sign in' : 'Create account')}
           </button>
         </form>
+
+        <div style={{ marginTop: '16px', textAlign: 'center' }}>
+          <button
+            onClick={() => {
+              setMode(isSignIn ? 'signup' : 'signin');
+              setError('');
+              setSuccess('');
+              setValidationErrors({});
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#8b5cf6',
+              fontSize: '13px',
+              cursor: 'pointer',
+              textDecoration: 'underline'
+            }}
+          >
+            {isSignIn ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -60,19 +60,76 @@ app.get('/api/members', async (req, res) => {
   }
 });
 
-// Identify member by user_id
+// Identify member by user_id or email
 app.post('/api/members/identify', async (req, res) => {
   try {
-    const { user_id } = req.body;
+    const { auth_id, email, name } = req.body;
+    const user_id = auth_id; // Support both names
+    console.log('[DEBUG] Identifying member with user_id:', user_id, 'email:', email);
 
-    const { data, error } = await supabase
+    // 1. Try to find member by user_id first
+    let { data: member, error: authError } = await supabase
       .from('px_members')
       .select('*')
       .eq('user_id', user_id)
       .single();
 
-    if (error) throw error;
-    res.json(data);
+    // 2. If not found, try by email
+    if (!member && email) {
+      console.log('[DEBUG] Not found by user_id, trying email...');
+      const { data: emailMember, error: emailError } = await supabase
+        .from('px_members')
+        .select('*')
+        .eq('email', email.toLowerCase())
+        .single();
+
+      // 3. If found by email but no user_id, link them
+      if (emailMember) {
+        console.log('[DEBUG] Found by email, linking user_id...');
+        const { data: updated, error: updateError } = await supabase
+          .from('px_members')
+          .update({ user_id })
+          .eq('id', emailMember.id)
+          .select()
+          .single();
+
+        if (updateError) throw updateError;
+        member = updated;
+      }
+    }
+
+    // 4. If still not found, create new member
+    if (!member) {
+      console.log('[DEBUG] Member not found, creating new...');
+      const avatarColors = ['#7c6bf0', '#d4b3f5', '#5DCAA5', '#f0997b', '#e84393', '#3498db', '#f39c12', '#2ecc71'];
+
+      const { data: existing } = await supabase
+        .from('px_members')
+        .select('avatar_color');
+
+      const usedColors = existing?.map(m => m.avatar_color) || [];
+      const availableColor = avatarColors.find(c => !usedColors.includes(c)) || '#7c6bf0';
+
+      const memberName = name || email.split('@')[0];
+
+      const { data: newMember, error: createError } = await supabase
+        .from('px_members')
+        .insert({
+          user_id,
+          name: memberName,
+          email: email.toLowerCase(),
+          avatar_color: availableColor,
+          role: 'member'
+        })
+        .select()
+        .single();
+
+      if (createError) throw createError;
+      member = newMember;
+    }
+
+    console.log('[DEBUG] Final member:', member);
+    res.json(member);
   } catch (error) {
     logError('POST /api/members/identify', error);
     res.status(500).json({ error: error.message });
@@ -100,32 +157,114 @@ app.patch('/api/members/:id/vibe', async (req, res) => {
   }
 });
 
+// Update member profile
+app.put('/api/members/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = nullifyEmptyStrings(req.body);
+
+    const { data, error } = await supabase
+      .from('px_members')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    logError('PUT /api/members/:id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==================== PROJECTS ENDPOINTS ====================
 
-// List all projects with stats
+// List all projects with detailed stats
 app.get('/api/projects', async (req, res) => {
   try {
-    const { data: projects, error: projectsError } = await supabase
+    const { member_id } = req.query;
+
+    let projectsQuery = supabase
       .from('px_projects')
       .select('*')
       .order('name');
 
+    // Filter by member if specified
+    if (member_id) {
+      const { data: memberProjects } = await supabase
+        .from('px_project_members')
+        .select('project_id')
+        .eq('member_id', member_id);
+
+      const projectIds = memberProjects?.map(pm => pm.project_id) || [];
+      projectsQuery = projectsQuery.in('id', projectIds);
+    }
+
+    const { data: projects, error: projectsError } = await projectsQuery;
+
     if (projectsError) throw projectsError;
 
-    // Get task counts for each project
+    // Get detailed stats for each project
     const projectsWithStats = await Promise.all(
       projects.map(async (project) => {
-        const { count, error: countError } = await supabase
+        // Task counts by status
+        const { data: tasks } = await supabase
           .from('px_tasks')
-          .select('*', { count: 'exact', head: true })
+          .select('id, title, status, priority, due_date, assignee_id')
           .eq('project_id', project.id);
 
-        if (countError) {
-          logError('GET /api/projects - count tasks', countError);
-          return { ...project, task_count: 0 };
-        }
+        const statusCounts = {
+          todo: 0,
+          'in-progress': 0,
+          'in-review': 0,
+          blocked: 0,
+          done: 0
+        };
 
-        return { ...project, task_count: count || 0 };
+        tasks?.forEach(task => {
+          statusCounts[task.status] = (statusCounts[task.status] || 0) + 1;
+        });
+
+        // Total hours logged
+        const { data: timeEntries } = await supabase
+          .from('px_time_entries')
+          .select('hours, member_id')
+          .eq('project_id', project.id);
+
+        const total_hours_logged = timeEntries?.reduce((sum, entry) => sum + (entry.hours || 0), 0) || 0;
+
+        // Hours per member
+        const hoursPerMember = {};
+        timeEntries?.forEach(entry => {
+          hoursPerMember[entry.member_id] = (hoursPerMember[entry.member_id] || 0) + (entry.hours || 0);
+        });
+
+        const hours_per_member = Object.entries(hoursPerMember).map(([member_id, hours]) => ({
+          member_id,
+          hours
+        }));
+
+        // Project members
+        const { data: projectMembers } = await supabase
+          .from('px_project_members')
+          .select('member:px_members(id, name, avatar_color)')
+          .eq('project_id', project.id);
+
+        const members = projectMembers?.map(pm => pm.member) || [];
+
+        // Open tasks
+        const open_tasks = tasks?.filter(t => t.status !== 'done') || [];
+
+        return {
+          ...project,
+          task_count: tasks?.length || 0,
+          status_counts: statusCounts,
+          total_hours_logged,
+          hours_per_member,
+          members,
+          open_tasks
+        };
       })
     );
 
@@ -136,19 +275,112 @@ app.get('/api/projects', async (req, res) => {
   }
 });
 
+// Get projects stats summary
+app.get('/api/projects/stats', async (req, res) => {
+  try {
+    const { member_id } = req.query;
+
+    // Get member's projects
+    const { data: memberProjects } = await supabase
+      .from('px_project_members')
+      .select('project_id')
+      .eq('member_id', member_id);
+
+    const projectIds = memberProjects?.map(pm => pm.project_id) || [];
+
+    // Active projects count
+    const { count: active_projects } = await supabase
+      .from('px_projects')
+      .select('*', { count: 'exact', head: true })
+      .in('id', projectIds)
+      .eq('status', 'active');
+
+    // Open tasks count
+    const { count: open_tasks } = await supabase
+      .from('px_tasks')
+      .select('*', { count: 'exact', head: true })
+      .in('project_id', projectIds)
+      .neq('status', 'done');
+
+    // Hours logged
+    const { data: timeEntries } = await supabase
+      .from('px_time_entries')
+      .select('hours')
+      .in('project_id', projectIds)
+      .eq('member_id', member_id);
+
+    const hours_logged = timeEntries?.reduce((sum, entry) => sum + (entry.hours || 0), 0) || 0;
+
+    // Due this week
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const sunday = new Date(today);
+    sunday.setDate(today.getDate() + (7 - today.getDay()));
+
+    const { count: due_this_week } = await supabase
+      .from('px_tasks')
+      .select('*', { count: 'exact', head: true })
+      .in('project_id', projectIds)
+      .gte('due_date', today.toISOString().split('T')[0])
+      .lte('due_date', sunday.toISOString().split('T')[0]);
+
+    res.json({
+      active_projects: active_projects || 0,
+      open_tasks: open_tasks || 0,
+      hours_logged: Math.round(hours_logged * 10) / 10,
+      due_this_week: due_this_week || 0
+    });
+  } catch (error) {
+    logError('GET /api/projects/stats', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Create project
 app.post('/api/projects', async (req, res) => {
   try {
-    const projectData = nullifyEmptyStrings(req.body);
+    const { name, color, description, budget_hours, member_ids } = req.body;
 
-    const { data, error } = await supabase
+    const projectData = nullifyEmptyStrings({
+      name,
+      color,
+      description,
+      budget_hours,
+      status: 'active'
+    });
+
+    const { data: project, error: projectError } = await supabase
       .from('px_projects')
       .insert([projectData])
       .select()
       .single();
 
-    if (error) throw error;
-    res.json(data);
+    if (projectError) throw projectError;
+
+    // Insert project members
+    if (member_ids && member_ids.length > 0) {
+      const memberInserts = member_ids.map(member_id => ({
+        project_id: project.id,
+        member_id
+      }));
+
+      const { error: membersError } = await supabase
+        .from('px_project_members')
+        .insert(memberInserts);
+
+      if (membersError) throw membersError;
+    }
+
+    // Get full project with members
+    const { data: members } = await supabase
+      .from('px_project_members')
+      .select('member:px_members(id, name, avatar_color)')
+      .eq('project_id', project.id);
+
+    res.json({
+      ...project,
+      members: members?.map(m => m.member) || []
+    });
   } catch (error) {
     logError('POST /api/projects', error);
     res.status(500).json({ error: error.message });
@@ -156,6 +388,76 @@ app.post('/api/projects', async (req, res) => {
 });
 
 // Update project
+app.put('/api/projects/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, color, description, budget_hours, member_ids } = req.body;
+
+    const updates = nullifyEmptyStrings({
+      name,
+      color,
+      description,
+      budget_hours
+    });
+
+    const { data: project, error: projectError } = await supabase
+      .from('px_projects')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (projectError) throw projectError;
+
+    // Update project members if provided
+    if (member_ids) {
+      // Delete existing members
+      await supabase
+        .from('px_project_members')
+        .delete()
+        .eq('project_id', id);
+
+      // Insert new members
+      if (member_ids.length > 0) {
+        const memberInserts = member_ids.map(member_id => ({
+          project_id: id,
+          member_id
+        }));
+
+        await supabase
+          .from('px_project_members')
+          .insert(memberInserts);
+      }
+    }
+
+    res.json(project);
+  } catch (error) {
+    logError('PUT /api/projects/:id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete (archive) project
+app.delete('/api/projects/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabase
+      .from('px_projects')
+      .update({ status: 'archived' })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    logError('DELETE /api/projects/:id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Legacy update endpoint
 app.patch('/api/projects/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -205,17 +507,31 @@ app.get('/api/tasks', async (req, res) => {
       query = query.eq('priority', req.query.priority);
     }
 
-    const { data, error } = await query;
+    const { data, error} = await query;
 
     if (error) throw error;
 
-    // Transform tags array
-    const tasksWithTags = data.map(task => ({
-      ...task,
-      tags: task.tags?.map(t => t.tag) || []
+    // Transform tags array and add counts
+    const tasksWithCounts = await Promise.all(data.map(async (task) => {
+      const { count: commentCount } = await supabase
+        .from('px_task_comments')
+        .select('*', { count: 'exact', head: true })
+        .eq('task_id', task.id);
+
+      const { count: docCount } = await supabase
+        .from('px_docs')
+        .select('*', { count: 'exact', head: true })
+        .eq('task_id', task.id);
+
+      return {
+        ...task,
+        tags: task.tags?.map(t => t.tag) || [],
+        comment_count: commentCount || 0,
+        doc_count: docCount || 0
+      };
     }));
 
-    res.json(tasksWithTags);
+    res.json(tasksWithCounts);
   } catch (error) {
     logError('GET /api/tasks', error);
     res.status(500).json({ error: error.message });
@@ -515,7 +831,157 @@ app.get('/api/standups/vibes', async (req, res) => {
   }
 });
 
-// Upsert standup
+// Get today's standup data for all members
+app.get('/api/standup/today', async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+
+    // Get all members
+    const { data: members, error: membersError } = await supabase
+      .from('px_members')
+      .select('*')
+      .order('name');
+
+    if (membersError) throw membersError;
+
+    const result = await Promise.all(members.map(async (member) => {
+      // Get standup for today
+      const { data: standup } = await supabase
+        .from('px_standups')
+        .select('*')
+        .eq('member_id', member.id)
+        .eq('date', today)
+        .single();
+
+      // Get tasks in progress
+      const { data: working_on } = await supabase
+        .from('px_tasks')
+        .select('id, title, status')
+        .eq('status', 'in-progress')
+        .eq('assignee_id', member.id);
+
+      // Get tasks completed today
+      const { data: completed_today } = await supabase
+        .from('px_tasks')
+        .select('id, title, status, completed_at')
+        .eq('status', 'done')
+        .eq('assignee_id', member.id)
+        .gte('completed_at', `${today}T00:00:00`)
+        .lte('completed_at', `${today}T23:59:59`);
+
+      return {
+        member,
+        standup: standup || null,
+        working_on: working_on || [],
+        completed_today: completed_today || []
+      };
+    }));
+
+    res.json(result);
+  } catch (error) {
+    logError('GET /api/standup/today', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Upsert today's standup
+app.post('/api/standup/today', async (req, res) => {
+  try {
+    const { member_id, blockers, note, vibe } = req.body;
+    const today = new Date().toISOString().split('T')[0];
+
+    const standupData = nullifyEmptyStrings({
+      member_id,
+      date: today,
+      blockers,
+      note,
+      vibe
+    });
+
+    // Upsert standup
+    const { data: standup, error: standupError } = await supabase
+      .from('px_standups')
+      .upsert([standupData], {
+        onConflict: 'member_id,date',
+        ignoreDuplicates: false
+      })
+      .select()
+      .single();
+
+    if (standupError) throw standupError;
+
+    // Update member vibe and vibe_date
+    const { error: memberError } = await supabase
+      .from('px_members')
+      .update({ vibe, vibe_date: new Date().toISOString() })
+      .eq('id', member_id);
+
+    if (memberError) throw memberError;
+
+    res.json(standup);
+  } catch (error) {
+    logError('POST /api/standup/today', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get standup history
+app.get('/api/standup/history', async (req, res) => {
+  try {
+    const { period = 'daily', page = 1 } = req.query;
+    const limit = 10;
+    const offset = (page - 1) * limit;
+
+    // Get standups with pagination
+    const { data: standups, error: standupsError } = await supabase
+      .from('px_standups')
+      .select(`
+        *,
+        member:px_members(id, name, avatar_color)
+      `)
+      .order('date', { ascending: false })
+      .range(offset, offset + limit);
+
+    if (standupsError) throw standupsError;
+
+    // Group by period
+    const grouped = {};
+
+    for (const standup of standups || []) {
+      let key;
+      const date = new Date(standup.date);
+
+      if (period === 'daily') {
+        key = standup.date;
+      } else if (period === 'weekly') {
+        const monday = new Date(date);
+        monday.setDate(date.getDate() - date.getDay() + 1);
+        key = monday.toISOString().split('T')[0];
+      } else if (period === 'monthly') {
+        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      }
+
+      if (!grouped[key]) {
+        grouped[key] = {
+          date: key,
+          entries: []
+        };
+      }
+
+      grouped[key].entries.push(standup);
+    }
+
+    const data = Object.values(grouped);
+    const hasMore = standups && standups.length === limit + 1;
+
+    res.json({ data, hasMore });
+  } catch (error) {
+    logError('GET /api/standup/history', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Upsert standup (legacy)
 app.post('/api/standups', async (req, res) => {
   try {
     const standupData = nullifyEmptyStrings(req.body);
@@ -539,7 +1005,202 @@ app.post('/api/standups', async (req, res) => {
 
 // ==================== TIME TRACKING ENDPOINTS ====================
 
-// List time entries by week
+// Get time entries for a week
+app.get('/api/time', async (req, res) => {
+  try {
+    const { member_id, week_start } = req.query;
+
+    // Calculate week end (Sunday)
+    const weekStartDate = new Date(week_start);
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekStartDate.getDate() + 6);
+
+    const weekStartStr = week_start;
+    const weekEndStr = weekEndDate.toISOString().split('T')[0];
+
+    // Get all members
+    const { data: members } = await supabase
+      .from('px_members')
+      .select('*')
+      .order('name');
+
+    // Get time entries for the week
+    const { data: entries } = await supabase
+      .from('px_time_entries')
+      .select(`
+        *,
+        task:px_tasks(id, title),
+        project:px_projects(id, name, color)
+      `)
+      .gte('date', weekStartStr)
+      .lte('date', weekEndStr)
+      .order('date', { ascending: false });
+
+    // Group by member
+    const timeData = members.map(member => {
+      const memberEntries = entries?.filter(e => e.member_id === member.id) || [];
+      const total_hours = memberEntries.reduce((sum, e) => sum + (e.hours || 0), 0);
+
+      return {
+        member,
+        total_hours: Math.round(total_hours * 10) / 10,
+        entries: memberEntries.map(e => ({
+          id: e.id,
+          task_title: e.task?.title || null,
+          project_name: e.project?.name || null,
+          project_color: e.project?.color || null,
+          date: e.date,
+          hours: e.hours,
+          note: e.note
+        }))
+      };
+    });
+
+    // Project breakdown
+    const projectBreakdown = {};
+    entries?.forEach(entry => {
+      if (entry.project_id) {
+        if (!projectBreakdown[entry.project_id]) {
+          projectBreakdown[entry.project_id] = {
+            project_id: entry.project_id,
+            project_name: entry.project?.name || 'Unknown',
+            project_color: entry.project?.color || '#6b7280',
+            total_hours: 0
+          };
+        }
+        projectBreakdown[entry.project_id].total_hours += entry.hours || 0;
+      }
+    });
+
+    res.json({
+      time_data: timeData,
+      project_breakdown: Object.values(projectBreakdown)
+    });
+  } catch (error) {
+    logError('GET /api/time', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get time stats for the week
+app.get('/api/time/stats', async (req, res) => {
+  try {
+    const { member_id, week_start } = req.query;
+
+    // This week dates
+    const weekStartDate = new Date(week_start);
+    const weekEndDate = new Date(weekStartDate);
+    weekEndDate.setDate(weekStartDate.getDate() + 6);
+
+    // Last week dates
+    const lastWeekStartDate = new Date(weekStartDate);
+    lastWeekStartDate.setDate(weekStartDate.getDate() - 7);
+    const lastWeekEndDate = new Date(weekStartDate);
+    lastWeekEndDate.setDate(weekStartDate.getDate() - 1);
+
+    const weekStartStr = week_start;
+    const weekEndStr = weekEndDate.toISOString().split('T')[0];
+    const lastWeekStartStr = lastWeekStartDate.toISOString().split('T')[0];
+    const lastWeekEndStr = lastWeekEndDate.toISOString().split('T')[0];
+
+    // Get all members
+    const { data: members } = await supabase
+      .from('px_members')
+      .select('*');
+
+    const stats = await Promise.all(members.map(async (member) => {
+      // This week hours
+      const { data: thisWeekEntries } = await supabase
+        .from('px_time_entries')
+        .select('hours')
+        .eq('member_id', member.id)
+        .gte('date', weekStartStr)
+        .lte('date', weekEndStr);
+
+      const this_week_hours = thisWeekEntries?.reduce((sum, e) => sum + (e.hours || 0), 0) || 0;
+
+      // Last week hours
+      const { data: lastWeekEntries } = await supabase
+        .from('px_time_entries')
+        .select('hours')
+        .eq('member_id', member.id)
+        .gte('date', lastWeekStartStr)
+        .lte('date', lastWeekEndStr);
+
+      const last_week_hours = lastWeekEntries?.reduce((sum, e) => sum + (e.hours || 0), 0) || 0;
+
+      return {
+        member,
+        this_week_hours: Math.round(this_week_hours * 10) / 10,
+        last_week_hours: Math.round(last_week_hours * 10) / 10,
+        diff: Math.round((this_week_hours - last_week_hours) * 10) / 10
+      };
+    }));
+
+    res.json(stats);
+  } catch (error) {
+    logError('GET /api/time/stats', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create time entry
+app.post('/api/time', async (req, res) => {
+  try {
+    const timeData = nullifyEmptyStrings(req.body);
+
+    const { data: entry, error: entryError } = await supabase
+      .from('px_time_entries')
+      .insert([timeData])
+      .select()
+      .single();
+
+    if (entryError) throw entryError;
+
+    // Get task and project info
+    const { data: task } = await supabase
+      .from('px_tasks')
+      .select('id, title')
+      .eq('id', entry.task_id)
+      .single();
+
+    const { data: project } = await supabase
+      .from('px_projects')
+      .select('id, name, color')
+      .eq('id', entry.project_id)
+      .single();
+
+    res.json({
+      ...entry,
+      task_title: task?.title || null,
+      project_name: project?.name || null,
+      project_color: project?.color || null
+    });
+  } catch (error) {
+    logError('POST /api/time', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete time entry
+app.delete('/api/time/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { error } = await supabase
+      .from('px_time_entries')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    logError('DELETE /api/time/:id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Legacy endpoints
 app.get('/api/time-entries', async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
@@ -570,7 +1231,6 @@ app.get('/api/time-entries', async (req, res) => {
   }
 });
 
-// Create time entry
 app.post('/api/time-entries', async (req, res) => {
   try {
     const timeData = nullifyEmptyStrings(req.body);
@@ -593,7 +1253,6 @@ app.post('/api/time-entries', async (req, res) => {
   }
 });
 
-// Delete time entry
 app.delete('/api/time-entries/:id', async (req, res) => {
   try {
     const { id } = req.params;
