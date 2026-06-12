@@ -654,6 +654,22 @@ app.patch('/api/tasks/:id', async (req, res) => {
     const { id } = req.params;
     const updates = nullifyEmptyStrings(req.body);
 
+    // Get current task to check status change
+    const { data: currentTask } = await supabaseAdmin
+      .from('px_tasks')
+      .select('status')
+      .eq('id', id)
+      .single();
+
+    // Set completed_at when task is moved to done
+    if (updates.status === 'done' && currentTask?.status !== 'done') {
+      updates.completed_at = new Date().toISOString();
+    }
+    // Clear completed_at if moved back from done
+    if (updates.status && updates.status !== 'done' && currentTask?.status === 'done') {
+      updates.completed_at = null;
+    }
+
     const { data, error } = await supabaseAdmin
       .from('px_tasks')
       .update({ ...updates, updated_at: new Date().toISOString() })
@@ -693,13 +709,31 @@ app.patch('/api/tasks/:id/move', async (req, res) => {
     const { id } = req.params;
     const { status, position } = req.body;
 
+    // Get current task to check status change
+    const { data: currentTask } = await supabaseAdmin
+      .from('px_tasks')
+      .select('status')
+      .eq('id', id)
+      .single();
+
+    const updates = {
+      status,
+      position,
+      updated_at: new Date().toISOString()
+    };
+
+    // Set completed_at when task is moved to done
+    if (status === 'done' && currentTask?.status !== 'done') {
+      updates.completed_at = new Date().toISOString();
+    }
+    // Clear completed_at if moved back from done
+    if (status !== 'done' && currentTask?.status === 'done') {
+      updates.completed_at = null;
+    }
+
     const { data, error } = await supabaseAdmin
       .from('px_tasks')
-      .update({
-        status,
-        position,
-        updated_at: new Date().toISOString()
-      })
+      .update(updates)
       .eq('id', id)
       .select()
       .single();
@@ -914,16 +948,13 @@ app.get('/api/standups/vibes', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_standups')
-      .select(`
-        *,
-        member:px_members(id, name, avatar_color)
-      `)
+      .select('member_id, vibe')
       .eq('date', today);
 
-    if (error) throw error;
-    res.json(data);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
   } catch (error) {
     logError('GET /api/standups/vibes', error);
     res.status(500).json({ error: error.message });
@@ -960,13 +991,17 @@ app.get('/api/standup/today', async (req, res) => {
         .eq('assignee_id', member.id);
 
       // Get tasks completed today
+      const todayDate = new Date(today);
+      const todayStart = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate()).toISOString();
+      const todayEnd = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate(), 23, 59, 59).toISOString();
+
       const { data: completed_today } = await supabase
         .from('px_tasks')
         .select('id, title, status, completed_at')
         .eq('status', 'done')
         .eq('assignee_id', member.id)
-        .gte('completed_at', `${today}T00:00:00`)
-        .lte('completed_at', `${today}T23:59:59`);
+        .gte('completed_at', todayStart)
+        .lte('completed_at', todayEnd);
 
       return {
         member,
@@ -986,97 +1021,86 @@ app.get('/api/standup/today', async (req, res) => {
 // Upsert today's standup
 app.post('/api/standup/today', async (req, res) => {
   try {
-    const { member_id, blockers, note, vibe } = req.body;
+    const { member_id, vibe, blockers, note } = req.body;
     const today = new Date().toISOString().split('T')[0];
 
-    const standupData = nullifyEmptyStrings({
-      member_id,
-      date: today,
-      blockers,
-      note,
-      vibe
-    });
-
-    // Upsert standup
-    const { data: standup, error: standupError } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from('px_standups')
-      .upsert([standupData], {
-        onConflict: 'member_id,date',
-        ignoreDuplicates: false
-      })
+      .upsert({
+        member_id,
+        date: today,
+        vibe: vibe || 3,
+        blockers: blockers || '',
+        note: note || ''
+      }, { onConflict: 'member_id,date' })
       .select()
       .single();
 
-    if (standupError) throw standupError;
-
-    // Update member vibe and vibe_date
-    const { error: memberError } = await supabaseAdmin
-      .from('px_members')
-      .update({ vibe, vibe_date: new Date().toISOString() })
-      .eq('id', member_id);
-
-    if (memberError) throw memberError;
-
-    res.json(standup);
+    if (error) {
+      console.error('Standup upsert error:', error);
+      return res.status(500).json({ error: error.message });
+    }
+    res.json(data);
   } catch (error) {
     logError('POST /api/standup/today', error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// Helper for getting Monday of a week
+const getWeekMonday = (dateStr) => {
+  const d = new Date(dateStr);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  return d.toISOString().split('T')[0];
+};
+
 // Get standup history
 app.get('/api/standup/history', async (req, res) => {
   try {
-    const { period = 'daily', page = 1 } = req.query;
-    const limit = 10;
-    const offset = (page - 1) * limit;
+    const { period = 'daily' } = req.query;
+    console.log('History endpoint called, period:', period);
 
-    // Get standups with pagination
-    const { data: standups, error: standupsError } = await supabase
+    // Get ALL standups with member info
+    const { data: standups, error } = await supabaseAdmin
       .from('px_standups')
       .select(`
-        *,
-        member:px_members(id, name, avatar_color)
+        id, member_id, date, blockers, note, vibe,
+        px_members (id, name, avatar_color)
       `)
       .order('date', { ascending: false })
-      .range(offset, offset + limit);
+      .limit(100);
 
-    if (standupsError) throw standupsError;
-
-    // Group by period
-    const grouped = {};
-
-    for (const standup of standups || []) {
-      let key;
-      const date = new Date(standup.date);
-
-      if (period === 'daily') {
-        key = standup.date;
-      } else if (period === 'weekly') {
-        const monday = new Date(date);
-        monday.setDate(date.getDate() - date.getDay() + 1);
-        key = monday.toISOString().split('T')[0];
-      } else if (period === 'monthly') {
-        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      }
-
-      if (!grouped[key]) {
-        grouped[key] = {
-          date: key,
-          entries: []
-        };
-      }
-
-      grouped[key].entries.push(standup);
+    console.log('Raw standups:', standups?.length, error);
+    if (error) throw error;
+    if (!standups || standups.length === 0) {
+      return res.json({ data: [], hasMore: false });
     }
 
-    const data = Object.values(grouped);
-    const hasMore = standups && standups.length === limit + 1;
+    // Group by date for daily view
+    const grouped = {};
+    standups.forEach(s => {
+      const key = period === 'monthly' ? s.date.slice(0, 7)
+                : period === 'weekly'  ? getWeekMonday(s.date)
+                : s.date;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push({
+        member: s.px_members,
+        standup: s
+      });
+    });
 
-    res.json({ data, hasMore });
-  } catch (error) {
-    logError('GET /api/standup/history', error);
-    res.status(500).json({ error: error.message });
+    const sorted = Object.entries(grouped)
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, entries]) => ({ date: key, entries }));
+
+    console.log('Grouped history:', sorted.length, 'items');
+    res.json({ data: sorted, hasMore: false });
+
+  } catch (err) {
+    console.error('History error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1299,13 +1323,13 @@ app.delete('/api/time/:id', async (req, res) => {
   }
 });
 
-// Get heatmap data (past 12 weeks)
+// Get heatmap data (past year)
 app.get('/api/time/heatmap', async (req, res) => {
   try {
     const { member_id } = req.query;
-    const twelveWeeksAgo = new Date();
-    twelveWeeksAgo.setDate(twelveWeeksAgo.getDate() - 84);
-    const fromDate = twelveWeeksAgo.toISOString().split('T')[0];
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+    const fromDate = oneYearAgo.toISOString().split('T')[0];
 
     const { data, error } = await supabaseAdmin
       .from('px_time_entries')

@@ -7,10 +7,13 @@ export default function StandupView({ T, currentMember, members }) {
   const [activeTab, setActiveTab] = useState('today');
   const [todayData, setTodayData] = useState([]);
   const [myDraft, setMyDraft] = useState({ blockers: '', note: '', vibe: 3 });
+  const [mySavedStandup, setMySavedStandup] = useState(null);
+  const [isEditing, setIsEditing] = useState(true);
   const [historyPeriod, setHistoryPeriod] = useState('daily');
   const [historyData, setHistoryData] = useState([]);
   const [historyPage, setHistoryPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [expandedDays, setExpandedDays] = useState([0]);
@@ -22,9 +25,11 @@ export default function StandupView({ T, currentMember, members }) {
 
   useEffect(() => {
     if (activeTab === 'history') {
+      setHistoryPage(1);
+      setHistoryData([]);
       loadHistory();
     }
-  }, [activeTab, historyPeriod, historyPage]);
+  }, [historyPeriod, activeTab]);
 
   const loadTodayData = async () => {
     try {
@@ -32,14 +37,19 @@ export default function StandupView({ T, currentMember, members }) {
       const data = await response.json();
       setTodayData(data);
 
-      // Pre-fill myDraft if currentMember has standup
-      const myStandup = data.find(d => d.member.id === currentMember.id);
-      if (myStandup?.standup) {
+      // Check if today's standup already exists for currentMember
+      const myData = data.find(d => d.member?.id === currentMember?.id);
+      if (myData?.standup) {
+        setMySavedStandup(myData.standup);
+        setIsEditing(false);
         setMyDraft({
-          blockers: myStandup.standup.blockers || '',
-          note: myStandup.standup.note || '',
-          vibe: myStandup.standup.vibe || 3
+          blockers: myData.standup.blockers || '',
+          note: myData.standup.note || '',
+          vibe: myData.standup.vibe || 3
         });
+      } else {
+        setMySavedStandup(null);
+        setIsEditing(true);
       }
     } catch (error) {
       console.error('Failed to load today data:', error);
@@ -47,20 +57,26 @@ export default function StandupView({ T, currentMember, members }) {
   };
 
   const loadHistory = async () => {
+    console.log('Fetching history, period:', historyPeriod, 'page:', historyPage);
+    setLoadingHistory(true);
     try {
-      const response = await fetch(`${API_BASE}/api/standup/history?period=${historyPeriod}&page=${historyPage}`);
-      const { data, hasMore: more } = await response.json();
-      setHistoryData(data);
-      setHasMore(more);
-    } catch (error) {
-      console.error('Failed to load history:', error);
+      const res = await fetch(`${API_BASE}/api/standup/history?period=${historyPeriod}&page=${historyPage}`);
+      console.log('History response status:', res.status);
+      const data = await res.json();
+      console.log('History data:', data);
+      setHistoryData(data.data || []);
+      setHasMore(data.hasMore || false);
+    } catch (err) {
+      console.error('History fetch error:', err);
+    } finally {
+      setLoadingHistory(false);
     }
   };
 
   const handleSaveStandup = async () => {
     setSaving(true);
     try {
-      await fetch(`${API_BASE}/api/standup/today`, {
+      const res = await fetch(`${API_BASE}/api/standup/today`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -68,10 +84,13 @@ export default function StandupView({ T, currentMember, members }) {
           ...myDraft
         })
       });
-
-      await loadTodayData();
+      const savedStandup = await res.json();
+      setMySavedStandup(savedStandup);
+      setIsEditing(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      // Refetch today data to update submission pips
+      await loadTodayData();
     } catch (error) {
       console.error('Failed to save standup:', error);
     } finally {
@@ -97,15 +116,19 @@ export default function StandupView({ T, currentMember, members }) {
   const submittedCount = todayData.filter(d => d.standup).length;
 
   return (
-    <div style={{ padding: 0 }}>
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 20px 24px' }}>
       {/* Page Header */}
       <div style={{
-        padding: '16px 20px',
+        padding: '16px 0',
         borderBottom: `0.5px solid ${T.border}`,
         background: T.card,
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'center'
+        alignItems: 'center',
+        marginLeft: -20,
+        marginRight: -20,
+        paddingLeft: 20,
+        paddingRight: 20
       }}>
         <div>
           <div style={{ fontSize: '15px', fontWeight: '500', color: T.text }}>Standup</div>
@@ -152,7 +175,7 @@ export default function StandupView({ T, currentMember, members }) {
       </div>
 
       {/* Tab Toggle */}
-      <div style={{ padding: '16px 20px 12px', display: 'flex', gap: '4px' }}>
+      <div style={{ padding: '16px 0 12px', display: 'flex', gap: '4px' }}>
         <button
           onClick={() => setActiveTab('today')}
           style={{
@@ -186,8 +209,8 @@ export default function StandupView({ T, currentMember, members }) {
       </div>
 
       {/* Content */}
-      <div style={{ padding: '0 20px 20px' }}>
-        {activeTab === 'today' && myData && (
+      <div style={{ padding: 0 }}>
+        {activeTab === 'today' && (
           <>
             {/* My Standup Card */}
             <div style={{
@@ -216,139 +239,198 @@ export default function StandupView({ T, currentMember, members }) {
                   <div>
                     <div style={{ fontSize: '14px', fontWeight: '500', color: T.text }}>My standup</div>
                     <div style={{ fontSize: '11px', color: T.textTertiary }}>
-                      Auto-filled from board · add blockers and note
+                      {mySavedStandup && !isEditing ? 'View or edit your standup' : 'Auto-filled from board · add blockers and note'}
                     </div>
                   </div>
                 </div>
-
-                {/* Vibe Picker */}
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  {vibes.map(v => (
-                    <button
-                      key={v.value}
-                      onClick={() => setMyDraft({ ...myDraft, vibe: v.value })}
-                      style={{
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '50%',
-                        background: myDraft.vibe === v.value ? 'rgba(124,107,240,0.1)' : T.surfaceHover,
-                        border: `1.5px solid ${myDraft.vibe === v.value ? '#7c6bf0' : T.border}`,
-                        fontSize: '16px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        padding: 0
-                      }}
-                    >
-                      {v.emoji}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Three Column Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '12px' }}>
-                <div>
-                  <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
-                    Working on today
-                  </div>
-                  {myData.working_on.length === 0 ? (
-                    <div style={{ fontSize: '11px', color: T.textTertiary, fontStyle: 'italic' }}>
-                      Nothing in progress
-                    </div>
-                  ) : (
-                    myData.working_on.map(task => (
-                      <div key={task.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                        <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#7c6bf0' }} />
-                        <span style={{ fontSize: '11px', color: T.textSecondary }}>{task.title}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div>
-                  <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
-                    Completed today
-                  </div>
-                  {myData.completed_today.length === 0 ? (
-                    <div style={{ fontSize: '11px', color: T.textTertiary, fontStyle: 'italic' }}>
-                      Nothing completed yet
-                    </div>
-                  ) : (
-                    myData.completed_today.map(task => (
-                      <div key={task.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
-                        <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#2ecc71' }} />
-                        <span style={{ fontSize: '11px', color: T.textSecondary }}>{task.title}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div>
-                  <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
-                    Blockers
-                  </div>
-                  <textarea
-                    value={myDraft.blockers}
-                    onChange={(e) => setMyDraft({ ...myDraft, blockers: e.target.value })}
-                    placeholder="Any blockers?"
-                    style={{
-                      width: '100%',
-                      background: T.surfaceHover,
-                      border: `0.5px solid ${T.border}`,
-                      borderRadius: '6px',
-                      padding: '8px 10px',
-                      fontSize: '11px',
-                      color: T.textSecondary,
-                      resize: 'none',
-                      minHeight: '60px',
-                      fontFamily: 'inherit',
-                      outline: 'none'
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Note Field */}
-              <div>
-                <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
-                  Note to team
-                </div>
-                <textarea
-                  value={myDraft.note}
-                  onChange={(e) => setMyDraft({ ...myDraft, note: e.target.value })}
-                  placeholder="Anything the team should know?"
-                  style={{
-                    width: '100%',
-                    background: T.surfaceHover,
-                    border: `0.5px solid ${T.border}`,
-                    borderRadius: '6px',
-                    padding: '8px 10px',
-                    fontSize: '11px',
+                {mySavedStandup && !isEditing && (
+                  <button onClick={() => setIsEditing(true)} style={{
+                    padding: '4px 12px',
+                    fontSize: 11,
+                    background: 'none',
+                    border: `.5px solid ${T.border}`,
+                    borderRadius: 6,
                     color: T.textSecondary,
-                    resize: 'none',
-                    minHeight: '44px',
-                    fontFamily: 'inherit',
-                    outline: 'none'
-                  }}
-                />
-              </div>
-
-              {/* Save Row */}
-              <div style={{
-                marginTop: '12px',
-                paddingTop: '12px',
-                borderTop: `0.5px solid ${T.border}`,
-                display: 'flex',
-                justifyContent: 'flex-end',
-                alignItems: 'center',
-                gap: '10px'
-              }}>
-                {saved && (
-                  <span style={{ fontSize: '11px', color: '#2ecc71' }}>Saved ✓</span>
+                    cursor: 'pointer',
+                    fontFamily: 'inherit'
+                  }}>Edit</button>
                 )}
               </div>
+
+              {mySavedStandup && !isEditing ? (
+                // SAVED VIEW
+                <>
+                  {saved && (
+                    <div style={{ fontSize: 11, color: '#2ecc71', marginBottom: 12 }}>
+                      Standup saved ✓
+                    </div>
+                  )}
+
+                  {/* Three Column Grid - Read only */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '12px' }}>
+                    <div>
+                      <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
+                        Working on today
+                      </div>
+                      {!myData || !myData.working_on || myData.working_on.length === 0 ? (
+                        <div style={{ fontSize: '11px', color: T.textTertiary, fontStyle: 'italic' }}>
+                          Nothing in progress
+                        </div>
+                      ) : (
+                        myData.working_on.map(task => (
+                          <div key={task.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#7c6bf0' }} />
+                            <span style={{ fontSize: '11px', color: T.textSecondary }}>{task.title}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
+                        Completed today
+                      </div>
+                      {!myData || !myData.completed_today || myData.completed_today.length === 0 ? (
+                        <div style={{ fontSize: '11px', color: T.textTertiary, fontStyle: 'italic' }}>
+                          Nothing completed yet
+                        </div>
+                      ) : (
+                        myData.completed_today.map(task => (
+                          <div key={task.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#2ecc71' }} />
+                            <span style={{ fontSize: '11px', color: T.textSecondary }}>{task.title}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
+                        Blockers
+                      </div>
+                      <div style={{ fontSize: '11px', color: mySavedStandup.blockers ? T.textSecondary : T.textTertiary, fontStyle: mySavedStandup.blockers ? 'normal' : 'italic' }}>
+                        {mySavedStandup.blockers || 'No blockers'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Note */}
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '4px' }}>
+                      Note to team
+                    </div>
+                    <div style={{ fontSize: '11px', color: mySavedStandup.note ? T.textSecondary : T.textTertiary, fontStyle: mySavedStandup.note ? 'normal' : 'italic' }}>
+                      {mySavedStandup.note || '—'}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                // EDIT VIEW
+                <>
+                  {/* Three Column Grid */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '14px', marginBottom: '12px' }}>
+                    <div>
+                      <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
+                        Working on today
+                      </div>
+                      {!myData || !myData.working_on || myData.working_on.length === 0 ? (
+                        <div style={{ fontSize: '11px', color: T.textTertiary, fontStyle: 'italic' }}>
+                          Nothing in progress
+                        </div>
+                      ) : (
+                        myData.working_on.map(task => (
+                          <div key={task.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#7c6bf0' }} />
+                            <span style={{ fontSize: '11px', color: T.textSecondary }}>{task.title}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
+                        Completed today
+                      </div>
+                      {!myData || !myData.completed_today || myData.completed_today.length === 0 ? (
+                        <div style={{ fontSize: '11px', color: T.textTertiary, fontStyle: 'italic' }}>
+                          Nothing completed yet
+                        </div>
+                      ) : (
+                        myData.completed_today.map(task => (
+                          <div key={task.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                            <div style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#2ecc71' }} />
+                            <span style={{ fontSize: '11px', color: T.textSecondary }}>{task.title}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    <div>
+                      <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
+                        Blockers
+                      </div>
+                      <textarea
+                        value={myDraft.blockers}
+                        onChange={(e) => setMyDraft({ ...myDraft, blockers: e.target.value })}
+                        placeholder="Any blockers?"
+                        style={{
+                          width: '100%',
+                          background: T.surfaceHover,
+                          border: `0.5px solid ${T.border}`,
+                          borderRadius: '6px',
+                          padding: '8px 10px',
+                          fontSize: '11px',
+                          color: T.textSecondary,
+                          resize: 'none',
+                          minHeight: '60px',
+                          fontFamily: 'inherit',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Note Field */}
+                  <div>
+                    <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '6px' }}>
+                      Note to team
+                    </div>
+                    <textarea
+                      value={myDraft.note}
+                      onChange={(e) => setMyDraft({ ...myDraft, note: e.target.value })}
+                      placeholder="Anything the team should know?"
+                      style={{
+                        width: '100%',
+                        background: T.surfaceHover,
+                        border: `0.5px solid ${T.border}`,
+                        borderRadius: '6px',
+                        padding: '8px 10px',
+                        fontSize: '11px',
+                        color: T.textSecondary,
+                        resize: 'none',
+                        minHeight: '44px',
+                        fontFamily: 'inherit',
+                        outline: 'none'
+                      }}
+                    />
+                  </div>
+
+                  {/* Save Row */}
+                  <div style={{
+                    marginTop: '12px',
+                    paddingTop: '12px',
+                    borderTop: `0.5px solid ${T.border}`,
+                    display: 'flex',
+                    justifyContent: 'flex-end',
+                    alignItems: 'center',
+                    gap: '10px'
+                  }}>
+                    {saved && (
+                      <span style={{ fontSize: '11px', color: '#2ecc71' }}>Saved ✓</span>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Team Section */}
@@ -516,73 +598,83 @@ export default function StandupView({ T, currentMember, members }) {
             </div>
 
             {/* History List */}
-            {historyData.map((day, idx) => {
-              const isExpanded = expandedDays.includes(idx);
-              return (
-                <div key={day.date} style={{
-                  background: T.card,
-                  border: `0.5px solid ${T.border}`,
-                  borderRadius: '8px',
-                  marginBottom: '6px',
-                  overflow: 'hidden'
-                }}>
-                  <div
-                    onClick={() => {
-                      if (isExpanded) {
-                        setExpandedDays(expandedDays.filter(i => i !== idx));
-                      } else {
-                        setExpandedDays([...expandedDays, idx]);
-                      }
-                    }}
-                    style={{
-                      padding: '10px 14px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}
-                  >
-                    <div style={{ fontSize: '12px', fontWeight: '500', color: T.text }}>
-                      {formatDate(day.date)}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ fontSize: '10px', color: T.textTertiary }}>
-                        {day.entries.length} submitted
+            {loadingHistory && historyData.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: T.textTertiary, fontSize: '12px' }}>
+                Loading history...
+              </div>
+            ) : historyData.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: T.textTertiary, fontSize: '12px' }}>
+                No standup history yet. Save your first standup to see it here.
+              </div>
+            ) : (
+              historyData.map((day, idx) => {
+                const isExpanded = expandedDays.includes(idx);
+                return (
+                  <div key={day.date} style={{
+                    background: T.card,
+                    border: `0.5px solid ${T.border}`,
+                    borderRadius: '8px',
+                    marginBottom: '6px',
+                    overflow: 'hidden'
+                  }}>
+                    <div
+                      onClick={() => {
+                        if (isExpanded) {
+                          setExpandedDays(expandedDays.filter(i => i !== idx));
+                        } else {
+                          setExpandedDays([...expandedDays, idx]);
+                        }
+                      }}
+                      style={{
+                        padding: '10px 14px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <div style={{ fontSize: '12px', fontWeight: '500', color: T.text }}>
+                        {formatDate(day.date)}
                       </div>
-                      {isExpanded ? <ChevronUp size={16} color={T.textTertiary} /> : <ChevronDown size={16} color={T.textTertiary} />}
-                    </div>
-                  </div>
-
-                  {isExpanded && (
-                    <div style={{
-                      padding: '10px 14px',
-                      borderTop: `0.5px solid ${T.border}`,
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(4, 1fr)',
-                      gap: '12px'
-                    }}>
-                      {day.entries.map(entry => (
-                        <div key={entry.id}>
-                          <div style={{ fontSize: '10px', fontWeight: '500', color: T.textSecondary, marginBottom: '4px' }}>
-                            {entry.member.name} {entry.vibe && vibes.find(v => v.value === entry.vibe)?.emoji}
-                          </div>
-                          {entry.blockers && (
-                            <div style={{ fontSize: '9px', color: '#e74c3c', marginBottom: '2px' }}>
-                              ⚠ {entry.blockers}
-                            </div>
-                          )}
-                          {entry.note && (
-                            <div style={{ fontSize: '9px', color: T.textTertiary, fontStyle: 'italic' }}>
-                              {entry.note}
-                            </div>
-                          )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ fontSize: '10px', color: T.textTertiary }}>
+                          {day.entries.length} submitted
                         </div>
-                      ))}
+                        {isExpanded ? <ChevronUp size={16} color={T.textTertiary} /> : <ChevronDown size={16} color={T.textTertiary} />}
+                      </div>
                     </div>
-                  )}
-                </div>
-              );
-            })}
+
+                    {isExpanded && (
+                      <div style={{
+                        padding: '10px 14px',
+                        borderTop: `0.5px solid ${T.border}`,
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(4, 1fr)',
+                        gap: '12px'
+                      }}>
+                        {day.entries.map((entry, entryIdx) => (
+                          <div key={entryIdx}>
+                            <div style={{ fontSize: '10px', fontWeight: '500', color: T.textSecondary, marginBottom: '4px' }}>
+                              {entry.member.name} {entry.standup.vibe && vibes.find(v => v.value === entry.standup.vibe)?.emoji}
+                            </div>
+                            {entry.standup.blockers && (
+                              <div style={{ fontSize: '9px', color: '#e74c3c', marginBottom: '2px' }}>
+                                ⚠ {entry.standup.blockers}
+                              </div>
+                            )}
+                            {entry.standup.note && (
+                              <div style={{ fontSize: '9px', color: T.textTertiary, fontStyle: 'italic' }}>
+                                {entry.standup.note}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
 
             {hasMore && (
               <button

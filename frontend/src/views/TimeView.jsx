@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'tabler-icons-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -11,12 +11,251 @@ function getMonday(date) {
   return monday.toISOString().split('T')[0];
 }
 
+const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick }) => {
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+  // Map data by date string
+  const hoursMap = {};
+  data.forEach(d => { hoursMap[d.date] = d.hours; });
+
+  // Daily view — special handling with stacked rectangles
+  if (period === 'daily') {
+    const today = new Date();
+    const monday = new Date(today);
+    const day = today.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    monday.setDate(today.getDate() + diff);
+
+    const past7 = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const dayNum = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const hours = Math.min(hoursMap[dateStr] || 0, 8);
+      const isWeekend = i >= 5;
+      const isToday = dateStr === new Date().toISOString().split('T')[0];
+      return { dateStr, dayName, dayNum, hours, isWeekend, isToday };
+    });
+
+    return (
+      <div style={{ width: '100%' }}>
+        <div style={{ display: 'flex', paddingLeft: 34, marginBottom: 8, gap: 6 }}>
+          {past7.map((day, i) => (
+            <div key={i} style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: 9, color: day.isToday ? '#7c6bf0' : T.textTertiary, fontWeight: day.isToday ? 600 : 400 }}>
+                {day.dayName}
+              </div>
+              <div style={{ fontSize: 9, color: T.textTertiary }}>{day.dayNum}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, width: '100%', alignItems: 'flex-start' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, width: 28, flexShrink: 0 }}>
+            {Array.from({ length: 8 }, (_, i) => (
+              <div key={i} style={{
+                height: 14, fontSize: 9, color: T.textTertiary,
+                display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 4
+              }}>
+                {8 - i}h
+              </div>
+            ))}
+          </div>
+
+          {past7.map((day, i) => (
+            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 3,
+                width: '100%', opacity: day.isWeekend ? 0.45 : 1
+              }}>
+                {Array.from({ length: 8 }, (_, hourIdx) => {
+                  const hourNum = 7 - hourIdx + 1;
+                  const filled = hourNum <= day.hours;
+                  const isSelected = selectedDay === day.dateStr;
+                  return (
+                    <div
+                      key={hourIdx}
+                      onClick={() => onDayClick(day.dateStr)}
+                      title={`${day.dayNum}: ${filled ? `${hourNum}h logged` : `${hourNum}h — not logged`}`}
+                      style={{
+                        width: '100%', height: 14, borderRadius: 3,
+                        background: filled ? '#7c6bf0' : T.bg3 || T.surfaceHover,
+                        opacity: filled ? (0.4 + (hourNum / 8) * 0.6) : 1,
+                        transition: 'all 0.15s',
+                        cursor: 'pointer',
+                        boxShadow: isSelected ? `0 0 0 2px ${T.bg2 || T.background}, 0 0 0 3px #7c6bf0` : 'none'
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              {day.isToday && (
+                <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#7c6bf0', marginTop: 1 }} />
+              )}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 12, height: 12, borderRadius: 2, background: T.bg3 || T.surfaceHover }} />
+            <span style={{ fontSize: 9, color: T.textTertiary }}>0h (not logged)</span>
+            <div style={{ width: 12, height: 12, borderRadius: 2, background: '#7c6bf0', marginLeft: 8 }} />
+            <span style={{ fontSize: 9, color: T.textTertiary }}>hours logged</span>
+            <span style={{ fontSize: 9, color: T.textTertiary, marginLeft: 8 }}>max 8h/day</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(() => {
+              const total = past7.reduce((s, d) => s + d.hours, 0);
+              const best = past7.reduce((a, b) => b.hours > a.hours ? b : a, past7[0]);
+              return (
+                <>
+                  <div style={{ fontSize: 10, color: T.textSecondary, background: T.surfaceHover, padding: '3px 10px', borderRadius: 10 }}>
+                    This week: <strong style={{ color: T.text }}>{total.toFixed(1)}h</strong>
+                  </div>
+                  {best.hours > 0 && (
+                    <div style={{ fontSize: 10, color: T.textSecondary, background: T.surfaceHover, padding: '3px 10px', borderRadius: 10 }}>
+                      Best: <strong style={{ color: T.text }}>{best.dayName} · {best.hours}h</strong>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Monthly and Annually views
+  const today = new Date();
+  let startDate, numWeeks, topLabels, cellHeight;
+
+  if (period === 'monthly') {
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    startDate = firstDay;
+    numWeeks = 5;
+    cellHeight = 22;
+    topLabels = ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5'];
+  } else {
+    const yearStart = new Date(today.getFullYear(), 0, 1);
+    startDate = yearStart;
+    numWeeks = 52;
+    cellHeight = 14;
+    topLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  }
+
+  const maxHours = Math.max(...Object.values(hoursMap), 8);
+
+  const getColor = (hours, isWeekend) => {
+    if (isWeekend && hours === 0) return T.bg3 || T.surfaceHover;
+    if (hours === 0) return T.bg3 || T.surfaceHover;
+    const intensity = hours / maxHours;
+    if (intensity < 0.2) return 'rgba(124,107,240,0.18)';
+    if (intensity < 0.4) return 'rgba(124,107,240,0.38)';
+    if (intensity < 0.65) return 'rgba(124,107,240,0.62)';
+    return '#7c6bf0';
+  };
+
+  const buildCols = () => {
+    return Array.from({ length: numWeeks }, (_, w) => ({
+      cells: Array.from({ length: 7 }, (_, d) => {
+        const date = new Date(startDate);
+        date.setDate(startDate.getDate() + w * 7 + d);
+        const dateStr = date.toISOString().split('T')[0];
+        const hours = hoursMap[dateStr] || 0;
+        const isWeekend = d >= 5;
+        return { dateStr, hours, isWeekend };
+      })
+    }));
+  };
+
+  const cols = buildCols();
+  const labelEvery = Math.floor(numWeeks / topLabels.length);
+  const totalHours = Object.values(hoursMap).reduce((a, b) => a + b, 0);
+  const bestEntry = Object.entries(hoursMap).sort((a, b) => b[1] - a[1])[0];
+
+  return (
+    <div style={{ width: '100%' }}>
+      <div style={{ display: 'flex', paddingLeft: 30, marginBottom: 5 }}>
+        {topLabels.map((l, i) => (
+          <div key={i} style={{ flex: labelEvery, fontSize: 9, color: T.textTertiary }}>{l}</div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', overflowY: 'visible' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', width: 24, flexShrink: 0, gap: 2, paddingTop: 1 }}>
+          {dayLabels.map((d, i) => (
+            <div key={d} style={{
+              height: cellHeight, fontSize: 9, color: T.textTertiary,
+              display: 'flex', alignItems: 'center', opacity: i >= 5 ? 0.5 : 1
+            }}>{d}</div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 2, flex: 1 }}>
+          {cols.map((col, wi) => (
+            <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+              {col.cells.map((cell, di) => {
+                const isSelected = selectedDay === cell.dateStr;
+                return (
+                  <div
+                    key={di}
+                    onClick={() => onDayClick(cell.dateStr)}
+                    title={`${cell.dateStr}: ${cell.hours}h`}
+                    style={{
+                      height: cellHeight, borderRadius: 3,
+                      background: getColor(cell.hours, cell.isWeekend),
+                      opacity: cell.isWeekend ? 0.4 : 1,
+                      cursor: 'pointer',
+                      transition: 'all 0.1s',
+                      flexShrink: 0,
+                      boxShadow: isSelected ? `0 0 0 2px ${T.bg2 || T.background}, 0 0 0 3px #7c6bf0` : 'none'
+                    }}
+                    onMouseEnter={e => !isSelected && (e.currentTarget.style.transform = 'scale(1.15)')}
+                    onMouseLeave={e => !isSelected && (e.currentTarget.style.transform = 'scale(1)')}
+                  />
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 9, color: T.textTertiary }}>Less</span>
+          {[T.bg3 || T.surfaceHover, 'rgba(124,107,240,0.18)', 'rgba(124,107,240,0.38)', 'rgba(124,107,240,0.62)', '#7c6bf0'].map((c, i) => (
+            <div key={i} style={{ width: 12, height: 12, borderRadius: 2, background: c }} />
+          ))}
+          <span style={{ fontSize: 9, color: T.textTertiary }}>More</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {totalHours > 0 && (
+            <div style={{ fontSize: 10, color: T.textSecondary, background: T.surfaceHover, padding: '3px 10px', borderRadius: 10 }}>
+              Total: <strong style={{ color: T.text }}>{totalHours.toFixed(1)}h</strong>
+            </div>
+          )}
+          {bestEntry && (
+            <div style={{ fontSize: 10, color: T.textSecondary, background: T.surfaceHover, padding: '3px 10px', borderRadius: 10 }}>
+              Best day: <strong style={{ color: T.text }}>{bestEntry[0]} · {bestEntry[1]}h</strong>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function TimeView({ T, currentMember, members, projects }) {
+  const logFormRef = useRef(null);
   const [weekStart, setWeekStart] = useState(getMonday(new Date()));
   const [timeData, setTimeData] = useState([]);
   const [projectBreakdown, setProjectBreakdown] = useState([]);
   const [stats, setStats] = useState([]);
   const [selectedMember, setSelectedMember] = useState(null);
+  const [selectedDay, setSelectedDay] = useState(null);
   const [logType, setLogType] = useState('task');
   const [form, setForm] = useState({
     task_id: '',
@@ -28,6 +267,7 @@ export default function TimeView({ T, currentMember, members, projects }) {
   const [tasks, setTasks] = useState([]);
   const [saving, setSaving] = useState(false);
   const [heatmapData, setHeatmapData] = useState([]);
+  const [heatmapPeriod, setHeatmapPeriod] = useState('annually');
 
   useEffect(() => {
     if (currentMember) {
@@ -40,16 +280,14 @@ export default function TimeView({ T, currentMember, members, projects }) {
 
   useEffect(() => {
     if (!selectedMember) return;
-    fetch(`${API_BASE}/api/time/heatmap?member_id=${selectedMember.id}`)
-      .then(r => r.json())
-      .then(setHeatmapData)
-      .catch(err => console.error('Failed to load heatmap:', err));
+    loadHeatmap(selectedMember.id);
   }, [selectedMember]);
 
   const loadTimeData = async () => {
     try {
       const response = await fetch(`${API_BASE}/api/time?member_id=${currentMember.id}&week_start=${weekStart}`);
       const data = await response.json();
+      console.log('Loaded time data:', data);
       setTimeData(data.time_data || []);
       setProjectBreakdown(data.project_breakdown || []);
     } catch (error) {
@@ -61,9 +299,21 @@ export default function TimeView({ T, currentMember, members, projects }) {
     try {
       const response = await fetch(`${API_BASE}/api/time/stats?member_id=${currentMember.id}&week_start=${weekStart}`);
       const data = await response.json();
+      console.log('Loaded stats:', data);
       setStats(data);
     } catch (error) {
       console.error('Failed to load stats:', error);
+    }
+  };
+
+  const loadHeatmap = async (memberId) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/time/heatmap?member_id=${memberId}`);
+      const data = await response.json();
+      console.log('Loaded heatmap:', data);
+      setHeatmapData(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Failed to load heatmap:', error);
     }
   };
 
@@ -101,21 +351,38 @@ export default function TimeView({ T, currentMember, members, projects }) {
 
     setSaving(true);
     try {
-      await fetch(`${API_BASE}/api/time`, {
+      console.log('Saving time entry:', payload);
+      const response = await fetch(`${API_BASE}/api/time`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to save: ${response.statusText} - ${errorText}`);
+      }
+
+      const result = await response.json();
+      console.log('Save result:', result);
 
       setForm({
         ...form,
         hours: '',
         notes: ''
       });
+
+      // Reload all data
       await loadTimeData();
       await loadStats();
+
+      // Reload heatmap for the current user (who just logged time)
+      await loadHeatmap(currentMember.id);
+
+      console.log('All data reloaded successfully');
     } catch (error) {
       console.error('Failed to log time:', error);
+      alert('Failed to save hours: ' + error.message);
     } finally {
       setSaving(false);
     }
@@ -144,39 +411,41 @@ export default function TimeView({ T, currentMember, members, projects }) {
     return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
   };
 
-  const getDayData = (dayIndex) => {
-    const date = new Date(weekStart);
-    date.setDate(date.getDate() + dayIndex);
-    const dateStr = date.toISOString().split('T')[0];
-
-    const memberData = timeData.find(d => d.member.id === selectedMember?.id);
-    const entries = memberData?.entries.filter(e => e.date === dateStr) || [];
-    const hours = entries.reduce((sum, e) => sum + (e.hours || 0), 0);
-
-    return { date: dateStr, hours, entries };
+  const handleDayClick = (dateStr) => {
+    setSelectedDay(selectedDay === dateStr ? null : dateStr);
   };
 
-  const getMaxHours = () => {
-    const memberData = timeData.find(d => d.member.id === selectedMember?.id);
-    if (!memberData) return 8;
+  const getDayTotal = (dateStr) => {
+    return timeData
+      .flatMap(m => m.entries || [])
+      .filter(e => e.date === dateStr && e.member_id === selectedMember?.id)
+      .reduce((sum, e) => sum + Number(e.hours), 0);
+  };
 
-    const dailyHours = [];
-    for (let i = 0; i < 7; i++) {
-      const dayData = getDayData(i);
-      dailyHours.push(dayData.hours);
-    }
-
-    return Math.max(...dailyHours, 8);
+  const getDayProjects = (dateStr) => {
+    const entries = timeData
+      .flatMap(m => m.entries || [])
+      .filter(e => e.date === dateStr && e.member_id === selectedMember?.id);
+    const grouped = {};
+    entries.forEach(e => {
+      const key = e.project_id || 'none';
+      if (!grouped[key]) {
+        grouped[key] = {
+          project_id: e.project_id,
+          name: e.project_name,
+          color: e.project_color,
+          hours: 0
+        };
+      }
+      grouped[key].hours += Number(e.hours);
+    });
+    return Object.values(grouped);
   };
 
   const currentWeek = getMonday(new Date());
   const isCurrentWeek = weekStart === currentWeek;
 
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const maxHours = getMaxHours();
-
-  const selectedMemberData = timeData.find(d => d.member.id === selectedMember?.id);
-  const selectedMemberStats = stats.find(s => s.member.id === selectedMember?.id);
+  const selectedMemberData = timeData.find(d => d.member?.id === selectedMember?.id);
 
   // Group entries by date
   const entriesByDate = {};
@@ -189,53 +458,20 @@ export default function TimeView({ T, currentMember, members, projects }) {
 
   const sortedDates = Object.keys(entriesByDate).sort((a, b) => new Date(b) - new Date(a));
 
-  const buildHeatmapGrid = () => {
-    const weeks = 12;
-    const today = new Date();
-
-    // Map heatmap data by date string
-    const hoursMap = {};
-    heatmapData.forEach(d => { hoursMap[d.date] = d.hours });
-
-    // Find max hours for color scaling
-    const maxHours = Math.max(...Object.values(hoursMap), 1);
-
-    // Build array of week columns
-    const grid = [];
-    for (let w = weeks - 1; w >= 0; w--) {
-      const week = [];
-      for (let d = 0; d < 7; d++) {
-        const date = new Date(today);
-        date.setDate(date.getDate() - (w * 7) - (6 - d));
-        const dateStr = date.toISOString().split('T')[0];
-        const hours = hoursMap[dateStr] || 0;
-        week.push({ date: dateStr, hours, intensity: hours / maxHours });
-      }
-      grid.push(week);
-    }
-    return { grid };
-  };
-
-  const getColor = (intensity) => {
-    if (intensity === 0) return T.bg3 || T.surfaceHover;
-    if (intensity < 0.25) return 'rgba(124,107,240,0.2)';
-    if (intensity < 0.5)  return 'rgba(124,107,240,0.45)';
-    if (intensity < 0.75) return 'rgba(124,107,240,0.7)';
-    return '#7c6bf0';
-  };
-
-  const { grid } = buildHeatmapGrid();
-
   return (
-    <div style={{ padding: 0 }}>
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 20px 24px' }}>
       {/* Page Header */}
       <div style={{
-        padding: '16px 20px',
+        padding: '16px 0',
         borderBottom: `0.5px solid ${T.border}`,
         background: T.card,
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'center'
+        alignItems: 'center',
+        marginLeft: -20,
+        marginRight: -20,
+        paddingLeft: 20,
+        paddingRight: 20
       }}>
         <div>
           <div style={{ fontSize: '15px', fontWeight: '500', color: T.text }}>Time tracking</div>
@@ -285,6 +521,17 @@ export default function TimeView({ T, currentMember, members, projects }) {
         </div>
 
         <button
+          onClick={() => {
+            if (logFormRef.current) {
+              logFormRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              logFormRef.current.style.border = `0.5px solid #7c6bf0`;
+              setTimeout(() => {
+                if (logFormRef.current) {
+                  logFormRef.current.style.border = `0.5px solid ${T.border}`;
+                }
+              }, 1500);
+            }
+          }}
           style={{
             padding: '6px 14px',
             background: T.primary,
@@ -301,404 +548,187 @@ export default function TimeView({ T, currentMember, members, projects }) {
       </div>
 
       {/* Activity Heatmap */}
-      <div style={{ padding: '16px 20px 0' }}>
+      <div style={{ padding: '16px 0 0' }}>
         <div style={{
           background: T.card,
-          border: `.5px solid ${T.border}`,
+          border: `0.5px solid ${T.border}`,
           borderRadius: '10px',
-          padding: '16px',
+          padding: '18px',
           marginBottom: '14px'
         }}>
-          {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-            <div style={{ fontSize: '13px', fontWeight: '500', color: T.text }}>Activity overview</div>
-            {/* Member switcher */}
-            <div style={{ display: 'flex', gap: '4px' }}>
-              {members.map(m => (
-                <div
-                  key={m.id}
-                  onClick={() => setSelectedMember(m)}
-                  style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
-                    background: m.avatar_color,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '9px',
-                    fontWeight: '600',
-                    color: '#fff',
-                    cursor: 'pointer',
-                    border: selectedMember?.id === m.id ? `1.5px solid #7c6bf0` : '1.5px solid transparent',
-                    boxShadow: selectedMember?.id === m.id ? `0 0 0 1.5px ${T.card}, 0 0 0 3px #7c6bf0` : 'none'
-                  }}
-                >
-                  {m.name[0]}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Grid */}
-          <div style={{ display: 'flex', gap: '3px' }}>
-            {/* Day labels on left */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginRight: '4px' }}>
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
-                <div key={d} style={{
-                  height: '12px',
-                  fontSize: '9px',
-                  color: T.textTertiary,
-                  display: 'flex',
-                  alignItems: 'center',
-                  width: '24px'
-                }}>
-                  {d}
-                </div>
-              ))}
-            </div>
-
-            {/* Week columns */}
-            {grid.map((week, wi) => (
-              <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                {week.map((cell, di) => (
-                  <div
-                    key={di}
-                    title={`${cell.date}: ${cell.hours}h`}
-                    style={{
-                      width: '12px',
-                      height: '12px',
-                      borderRadius: '2px',
-                      background: getColor(cell.intensity),
-                      cursor: cell.hours > 0 ? 'pointer' : 'default',
-                      transition: 'transform 0.1s'
-                    }}
-                    onMouseEnter={e => { if (cell.hours > 0) e.target.style.transform = 'scale(1.3)' }}
-                    onMouseLeave={e => e.target.style.transform = 'scale(1)'}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
-
-          {/* Legend */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '10px', justifyContent: 'flex-end' }}>
-            <span style={{ fontSize: '9px', color: T.textTertiary }}>Less</span>
-            {[0, 0.25, 0.5, 0.75, 1].map((i, idx) => (
-              <div key={idx} style={{ width: '10px', height: '10px', borderRadius: '2px', background: getColor(i) }} />
-            ))}
-            <span style={{ fontSize: '9px', color: T.textTertiary }}>More</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Team Stats Row */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
-        gap: '8px',
-        padding: '16px 20px 12px'
-      }}>
-        {stats.map(stat => {
-          const isSelected = selectedMember?.id === stat.member.id;
-          return (
-            <div
-              key={stat.member.id}
-              onClick={() => setSelectedMember(stat.member)}
-              style={{
-                background: T.card,
-                border: `0.5px solid ${isSelected ? '#7c6bf0' : T.border}`,
-                borderRadius: '8px',
-                padding: '12px 14px',
-                cursor: 'pointer',
-                backgroundColor: isSelected ? 'rgba(124,107,240,0.04)' : T.card
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <div style={{
-                  width: '24px',
-                  height: '24px',
-                  borderRadius: '50%',
-                  background: stat.member.avatar_color,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'white',
-                  fontSize: '10px',
-                  fontWeight: '600'
-                }}>
-                  {stat.member.name[0]}
-                </div>
-                <span style={{ fontSize: '11px', color: T.text }}>{stat.member.name}</span>
-              </div>
-
-              <div style={{ fontSize: '22px', fontWeight: '500', color: T.text, marginBottom: '2px' }}>
-                {stat.this_week_hours}h
-              </div>
-              <div style={{ fontSize: '9px', color: T.textTertiary, marginBottom: '6px', textTransform: 'uppercase' }}>
-                this week
-              </div>
-
-              <div style={{
-                height: '3px',
-                background: T.surfaceHover,
-                borderRadius: '2px',
-                overflow: 'hidden',
-                marginBottom: '6px'
-              }}>
-                <div style={{
-                  width: `${Math.min((stat.this_week_hours / 40) * 100, 100)}%`,
-                  height: '100%',
-                  background: stat.member.avatar_color
-                }} />
-              </div>
-
-              {stat.diff !== 0 && (
-                <div style={{
-                  fontSize: '10px',
-                  color: stat.diff > 0 ? '#2ecc71' : '#e74c3c'
-                }}>
-                  {stat.diff > 0 ? '↑' : '↓'} {Math.abs(stat.diff)}h vs last week
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Main Layout */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 280px',
-        gap: '12px',
-        padding: '0 20px 20px'
-      }}>
-        {/* Left Column */}
-        <div>
-          {/* Weekly Chart */}
-          <div style={{
-            background: T.card,
-            border: `0.5px solid ${T.border}`,
-            borderRadius: '10px',
-            padding: '16px',
-            marginBottom: '12px'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <div style={{ fontSize: '13px', fontWeight: '500', color: T.text }}>
-                Weekly hours — {selectedMember?.name}
+                Activity overview — {selectedMember?.name}
               </div>
-              <div style={{ display: 'flex', gap: '6px' }}>
-                {members.map(member => (
+              <div style={{ display: 'flex', gap: '3px' }}>
+                {members.map(m => (
                   <div
-                    key={member.id}
-                    onClick={() => setSelectedMember(member)}
+                    key={m.id}
+                    onClick={() => setSelectedMember(m)}
                     style={{
                       width: '24px',
                       height: '24px',
                       borderRadius: '50%',
-                      background: member.avatar_color,
+                      background: m.avatar_color,
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      color: 'white',
-                      fontSize: '10px',
+                      fontSize: '9px',
                       fontWeight: '600',
+                      color: '#fff',
                       cursor: 'pointer',
-                      border: selectedMember?.id === member.id ? '2px solid #7c6bf0' : '2px solid transparent'
+                      boxShadow: selectedMember?.id === m.id
+                        ? `0 0 0 1.5px ${T.card}, 0 0 0 3px #7c6bf0`
+                        : 'none'
                     }}
                   >
-                    {member.name[0]}
+                    {m.name[0]}
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Bar Chart */}
-            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', height: '110px' }}>
-              {days.map((day, idx) => {
-                const dayData = getDayData(idx);
-                const heightPercent = maxHours > 0 ? (dayData.hours / maxHours) * 100 : 0;
-                const isWeekend = idx >= 5;
-
-                return (
-                  <div key={idx} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
-                    {dayData.hours > 0 && (
-                      <div style={{
-                        fontSize: '9px',
-                        color: T.textTertiary,
-                        marginBottom: '4px'
-                      }}>
-                        {dayData.hours}h
-                      </div>
-                    )}
-                    <div style={{
-                      width: '100%',
-                      height: `${heightPercent}%`,
-                      minHeight: dayData.hours > 0 ? '2px' : '0',
-                      background: selectedMember?.avatar_color || T.primary,
-                      borderRadius: '4px 4px 0 0',
-                      opacity: isWeekend ? 0.5 : 1
-                    }} />
-                    <div style={{ fontSize: '9px', color: T.textTertiary, marginTop: '4px' }}>
-                      {day}
-                    </div>
-                    <div style={{ fontSize: '9px', color: T.textTertiary }}>
-                      {new Date(dayData.date).getDate()}
-                    </div>
-                  </div>
-                );
-              })}
+            <div style={{ display: 'flex', gap: '1px', background: T.surfaceHover, borderRadius: '6px', padding: '2px' }}>
+              {['Daily', 'Monthly', 'Annually'].map(p => (
+                <div
+                  key={p}
+                  onClick={() => setHeatmapPeriod(p.toLowerCase())}
+                  style={{
+                    padding: '4px 14px',
+                    fontSize: '11px',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    color: heatmapPeriod === p.toLowerCase() ? '#7c6bf0' : T.textSecondary,
+                    fontWeight: heatmapPeriod === p.toLowerCase() ? '500' : '400',
+                    background: heatmapPeriod === p.toLowerCase() ? T.card : 'none',
+                    border: heatmapPeriod === p.toLowerCase() ? `0.5px solid ${T.border}` : 'none'
+                  }}
+                >
+                  {p}
+                </div>
+              ))}
             </div>
-
-            {/* Legend */}
-            {projectBreakdown.length > 0 && (
-              <div style={{ marginTop: '16px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                {projectBreakdown.map(pb => (
-                  <div key={pb.project_id} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <div style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      background: pb.project_color
-                    }} />
-                    <span style={{ fontSize: '10px', color: T.textTertiary }}>
-                      {pb.project_name}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
 
-          {/* This Week's Log */}
+          <HeatmapGrid
+            period={heatmapPeriod}
+            data={heatmapData}
+            T={T}
+            selectedDay={selectedDay}
+            onDayClick={handleDayClick}
+          />
+        </div>
+      </div>
+
+      {/* Day Detail Bar Chart (conditional) */}
+      {selectedDay && (
+        <div style={{ padding: 0 }}>
           <div style={{
-            background: T.card,
-            border: `0.5px solid ${T.border}`,
-            borderRadius: '10px',
-            padding: '16px'
+            background: T.bg2 || T.background,
+            border: `0.5px solid #7c6bf0`,
+            borderRadius: 10,
+            padding: 16,
+            marginBottom: 14
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <div style={{ fontSize: '13px', fontWeight: '500', color: T.text }}>
-                This week's log
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 500, color: T.text }}>
+                  {new Date(selectedDay).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                </div>
+                <div style={{ fontSize: 11, color: T.textTertiary, marginTop: 2 }}>Hours by project</div>
               </div>
-              <div style={{ fontSize: '14px', fontWeight: '500', color: '#7c6bf0' }}>
-                {selectedMemberData?.total_hours || 0}h
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 500, color: '#7c6bf0' }}>
+                  {getDayTotal(selectedDay)}h logged
+                </div>
+                <div
+                  onClick={() => setSelectedDay(null)}
+                  style={{
+                    fontSize: 13,
+                    color: T.textTertiary,
+                    cursor: 'pointer',
+                    padding: '2px 6px',
+                    borderRadius: 4
+                  }}
+                >
+                  ✕
+                </div>
               </div>
             </div>
 
-            {sortedDates.length === 0 ? (
-              <div style={{ fontSize: '11px', color: T.textTertiary, fontStyle: 'italic', padding: '20px', textAlign: 'center' }}>
-                No hours logged this week
-              </div>
-            ) : (
-              sortedDates.map(date => {
-                const entries = entriesByDate[date];
-                const dayTotal = entries.reduce((sum, e) => sum + (e.hours || 0), 0);
-
-                return (
-                  <div key={date} style={{ marginBottom: '12px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <span style={{ fontSize: '10px', color: T.textTertiary }}>
-                        {new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                      </span>
-                      <span style={{ fontSize: '10px', color: '#7c6bf0' }}>{dayTotal}h</span>
-                    </div>
-
-                    {entries.map(entry => (
-                      <div
-                        key={entry.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '7px',
-                          padding: '6px 8px',
-                          background: T.surfaceHover,
-                          borderRadius: '5px',
-                          marginBottom: '3px',
-                          position: 'relative'
-                        }}
-                        onMouseEnter={(e) => {
-                          const deleteBtn = e.currentTarget.querySelector('.delete-btn');
-                          if (deleteBtn) deleteBtn.style.opacity = '1';
-                        }}
-                        onMouseLeave={(e) => {
-                          const deleteBtn = e.currentTarget.querySelector('.delete-btn');
-                          if (deleteBtn) deleteBtn.style.opacity = '0';
-                        }}
-                      >
-                        {entry.project_color && (
-                          <div style={{
-                            width: '6px',
-                            height: '6px',
-                            borderRadius: '2px',
-                            background: entry.project_color,
-                            flexShrink: 0
-                          }} />
-                        )}
-                        <span style={{ flex: 1, fontSize: '11px', color: T.textSecondary }}>
-                          {entry.task_title || entry.project_name || 'General'}
-                        </span>
-                        {entry.notes && (
-                          <span style={{ fontSize: '10px', color: T.textTertiary, fontStyle: 'italic', marginLeft: 'auto' }}>
-                            {entry.notes}
-                          </span>
-                        )}
-                        <span style={{ fontSize: '12px', fontWeight: '500', color: T.text, marginLeft: 'auto' }}>
-                          {entry.hours}h
-                        </span>
-                        <button
-                          className="delete-btn"
-                          onClick={() => handleDeleteEntry(entry.id)}
-                          style={{
-                            background: 'transparent',
-                            border: 'none',
-                            cursor: 'pointer',
-                            color: T.textTertiary,
-                            padding: '2px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            opacity: 0,
-                            transition: 'opacity 0.2s'
-                          }}
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {getDayProjects(selectedDay).map(proj => (
+                <div key={proj.project_id || 'none'} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 2,
+                    background: proj.color || '#7c6bf0',
+                    flexShrink: 0
+                  }} />
+                  <div style={{ fontSize: 11, color: T.textSecondary, width: 140, flexShrink: 0 }}>
+                    {proj.name || 'No project'}
                   </div>
-                );
-              })
-            )}
+                  <div style={{ flex: 1, height: 8, background: T.bg3 || T.surfaceHover, borderRadius: 4, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      borderRadius: 4,
+                      background: proj.color || '#7c6bf0',
+                      width: `${(proj.hours / getDayTotal(selectedDay)) * 100}%`
+                    }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: T.text, fontWeight: 500, width: 32, textAlign: 'right', flexShrink: 0 }}>
+                    {proj.hours}h
+                  </div>
+                </div>
+              ))}
+              {getDayProjects(selectedDay).length === 0 && (
+                <div style={{ fontSize: 11, color: T.textTertiary }}>No hours logged on this day</div>
+              )}
+            </div>
           </div>
         </div>
+      )}
 
-        {/* Right Column */}
-        <div>
-          {/* Log Hours Card */}
-          <div style={{
-            background: T.card,
+      {/* Two Column Layout */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 280px',
+        gap: 12,
+        padding: 0
+      }}>
+        {/* LEFT — My hours */}
+        <div
+          ref={logFormRef}
+          style={{
+            background: T.bg2 || T.card,
             border: `0.5px solid ${T.border}`,
-            borderRadius: '10px',
-            padding: '16px',
-            marginBottom: '12px'
-          }}>
-            <div style={{ fontSize: '13px', fontWeight: '500', color: T.text, marginBottom: '12px' }}>
-              Log hours
+            borderRadius: 10,
+            padding: 16,
+            transition: 'border 0.3s ease'
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>My hours</div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: '#7c6bf0' }}>
+              {selectedMemberData?.total_hours || 0}h
             </div>
+          </div>
 
-            {/* Type Toggle */}
-            <div style={{ display: 'flex', gap: '4px', marginBottom: '12px' }}>
+          {/* Log form */}
+          <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: `0.5px solid ${T.border}` }}>
+            <div style={{ display: 'flex', gap: 1, background: T.bg3 || T.surfaceHover, borderRadius: 6, padding: 2, alignSelf: 'flex-start', marginBottom: 14 }}>
               <button
                 onClick={() => setLogType('task')}
                 style={{
-                  flex: 1,
-                  padding: '6px',
-                  background: logType === 'task' ? '#ffffff' : 'transparent',
-                  border: 'none',
-                  borderRadius: '4px',
-                  color: logType === 'task' ? '#7c6bf0' : T.text,
-                  fontSize: '11px',
-                  fontWeight: logType === 'task' ? '500' : '400',
+                  padding: '6px 16px',
+                  background: logType === 'task' ? T.card : 'transparent',
+                  border: logType === 'task' ? `0.5px solid ${T.border}` : 'none',
+                  borderRadius: 4,
+                  color: logType === 'task' ? '#7c6bf0' : T.textSecondary,
+                  fontSize: 11,
+                  fontWeight: logType === 'task' ? 500 : 400,
                   cursor: 'pointer'
                 }}
               >
@@ -707,14 +737,13 @@ export default function TimeView({ T, currentMember, members, projects }) {
               <button
                 onClick={() => setLogType('daily')}
                 style={{
-                  flex: 1,
-                  padding: '6px',
-                  background: logType === 'daily' ? '#ffffff' : 'transparent',
-                  border: 'none',
-                  borderRadius: '4px',
-                  color: logType === 'daily' ? '#7c6bf0' : T.text,
-                  fontSize: '11px',
-                  fontWeight: logType === 'daily' ? '500' : '400',
+                  padding: '6px 16px',
+                  background: logType === 'daily' ? T.card : 'transparent',
+                  border: logType === 'daily' ? `0.5px solid ${T.border}` : 'none',
+                  borderRadius: 4,
+                  color: logType === 'daily' ? '#7c6bf0' : T.textSecondary,
+                  fontSize: 11,
+                  fontWeight: logType === 'daily' ? 500 : 400,
                   cursor: 'pointer'
                 }}
               >
@@ -722,9 +751,9 @@ export default function TimeView({ T, currentMember, members, projects }) {
               </button>
             </div>
 
-            {/* Form */}
             {logType === 'task' ? (
               <>
+                <div style={{ fontSize: 10, color: T.textTertiary, marginBottom: 4 }}>Task</div>
                 <select
                   value={form.task_id}
                   onChange={(e) => setForm({ ...form, task_id: e.target.value })}
@@ -733,23 +762,24 @@ export default function TimeView({ T, currentMember, members, projects }) {
                     padding: '8px 10px',
                     background: T.background,
                     border: `0.5px solid ${T.border}`,
-                    borderRadius: '4px',
+                    borderRadius: 4,
                     color: T.text,
-                    fontSize: '11px',
-                    marginBottom: '8px',
+                    fontSize: 11,
+                    marginBottom: 8,
                     outline: 'none'
                   }}
                 >
                   <option value="">Select task...</option>
                   {tasks.map(task => (
                     <option key={task.id} value={task.id}>
-                      {task.project?.name ? `[${task.project.name}] ` : ''}{task.title}
+                      {task.title}
                     </option>
                   ))}
                 </select>
               </>
             ) : (
               <>
+                <div style={{ fontSize: 10, color: T.textTertiary, marginBottom: 4 }}>Project</div>
                 <select
                   value={form.project_id}
                   onChange={(e) => setForm({ ...form, project_id: e.target.value })}
@@ -758,10 +788,10 @@ export default function TimeView({ T, currentMember, members, projects }) {
                     padding: '8px 10px',
                     background: T.background,
                     border: `0.5px solid ${T.border}`,
-                    borderRadius: '4px',
+                    borderRadius: 4,
                     color: T.text,
-                    fontSize: '11px',
-                    marginBottom: '8px',
+                    fontSize: 11,
+                    marginBottom: 8,
                     outline: 'none'
                   }}
                 >
@@ -775,7 +805,7 @@ export default function TimeView({ T, currentMember, members, projects }) {
               </>
             )}
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
               <input
                 type="number"
                 placeholder="Hours"
@@ -785,9 +815,9 @@ export default function TimeView({ T, currentMember, members, projects }) {
                   padding: '8px 10px',
                   background: T.background,
                   border: `0.5px solid ${T.border}`,
-                  borderRadius: '4px',
+                  borderRadius: 4,
                   color: T.text,
-                  fontSize: '11px',
+                  fontSize: 11,
                   outline: 'none'
                 }}
               />
@@ -795,14 +825,23 @@ export default function TimeView({ T, currentMember, members, projects }) {
                 type="date"
                 value={form.date}
                 onChange={(e) => setForm({ ...form, date: e.target.value })}
+                onClick={(e) => {
+                  try {
+                    e.target.showPicker?.();
+                  } catch (err) {
+                    // Fallback for browsers that don't support showPicker
+                  }
+                }}
                 style={{
                   padding: '8px 10px',
                   background: T.background,
                   border: `0.5px solid ${T.border}`,
-                  borderRadius: '4px',
+                  borderRadius: 4,
                   color: T.text,
-                  fontSize: '11px',
-                  outline: 'none'
+                  fontSize: 11,
+                  outline: 'none',
+                  cursor: 'pointer',
+                  colorScheme: 'dark'
                 }}
               />
             </div>
@@ -816,14 +855,14 @@ export default function TimeView({ T, currentMember, members, projects }) {
                 padding: '8px 10px',
                 background: T.background,
                 border: `0.5px solid ${T.border}`,
-                borderRadius: '4px',
+                borderRadius: 4,
                 color: T.text,
-                fontSize: '11px',
+                fontSize: 11,
                 outline: 'none',
                 resize: 'none',
-                minHeight: '60px',
+                minHeight: 60,
                 fontFamily: 'inherit',
-                marginBottom: '8px'
+                marginBottom: 8
               }}
             />
 
@@ -832,33 +871,184 @@ export default function TimeView({ T, currentMember, members, projects }) {
               disabled={saving}
               style={{
                 width: '100%',
-                padding: '10px',
+                padding: 10,
                 background: T.primary,
                 color: 'white',
                 border: 'none',
-                borderRadius: '4px',
-                fontSize: '12px',
+                borderRadius: 4,
+                fontSize: 12,
                 cursor: saving ? 'not-allowed' : 'pointer',
-                fontWeight: '500'
+                fontWeight: 500
               }}
             >
               {saving ? 'Saving...' : 'Save hours'}
             </button>
           </div>
 
-          {/* Hours by Project */}
-          <div style={{
-            background: T.card,
-            border: `0.5px solid ${T.border}`,
-            borderRadius: '10px',
-            padding: '16px'
-          }}>
-            <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '10px' }}>
+          {/* Entries */}
+          {sortedDates.length === 0 ? (
+            <div style={{ fontSize: 11, color: T.textTertiary, fontStyle: 'italic', padding: 20, textAlign: 'center' }}>
+              No hours logged this week
+            </div>
+          ) : (
+            sortedDates.map(date => {
+              const entries = entriesByDate[date];
+              const dayTotal = entries.reduce((sum, e) => sum + (e.hours || 0), 0);
+
+              return (
+                <div key={date} style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                    <span style={{ fontSize: 10, color: T.textTertiary }}>
+                      {new Date(date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                    </span>
+                    <span style={{ fontSize: 10, color: '#7c6bf0' }}>{dayTotal}h</span>
+                  </div>
+
+                  {entries.map(entry => (
+                    <div
+                      key={entry.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 7,
+                        padding: '6px 8px',
+                        background: T.surfaceHover,
+                        borderRadius: 5,
+                        marginBottom: 3,
+                        position: 'relative'
+                      }}
+                      onMouseEnter={(e) => {
+                        const deleteBtn = e.currentTarget.querySelector('.delete-btn');
+                        if (deleteBtn) deleteBtn.style.opacity = '1';
+                      }}
+                      onMouseLeave={(e) => {
+                        const deleteBtn = e.currentTarget.querySelector('.delete-btn');
+                        if (deleteBtn) deleteBtn.style.opacity = '0';
+                      }}
+                    >
+                      {entry.project_color && (
+                        <div style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: 2,
+                          background: entry.project_color,
+                          flexShrink: 0
+                        }} />
+                      )}
+                      <span style={{ flex: 1, fontSize: 11, color: T.textSecondary }}>
+                        {entry.task_title || entry.project_name || 'General'}
+                      </span>
+                      {entry.notes && (
+                        <span style={{ fontSize: 10, color: T.textTertiary, fontStyle: 'italic', marginLeft: 'auto' }}>
+                          {entry.notes}
+                        </span>
+                      )}
+                      <span style={{ fontSize: 12, fontWeight: 500, color: T.text, marginLeft: 'auto' }}>
+                        {entry.hours}h
+                      </span>
+                      <button
+                        className="delete-btn"
+                        onClick={() => handleDeleteEntry(entry.id)}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: T.textTertiary,
+                          padding: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          opacity: 0,
+                          transition: 'opacity 0.2s'
+                        }}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* RIGHT — Team overview */}
+        <div style={{
+          background: T.bg2 || T.card,
+          border: `0.5px solid ${T.border}`,
+          borderRadius: 10,
+          padding: 16
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: T.text, marginBottom: 12 }}>
+            Team this week
+          </div>
+
+          {members.map(m => {
+            const memberHours = stats.find(s => s.member?.id === m.id);
+            const thisWeek = memberHours?.this_week_hours || 0;
+            const lastWeek = memberHours?.last_week_hours || 0;
+            const diff = thisWeek - lastWeek;
+            return (
+              <div
+                key={m.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '10px 0',
+                  borderBottom: `0.5px solid ${T.border}`
+                }}
+              >
+                <div style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: '50%',
+                  background: m.avatar_color,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: '#fff',
+                  flexShrink: 0
+                }}>
+                  {m.name[0]}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: T.text }}>{m.name}</div>
+                  <div style={{
+                    height: 4,
+                    background: T.bg3 || T.surfaceHover,
+                    borderRadius: 10,
+                    marginTop: 5,
+                    overflow: 'hidden'
+                  }}>
+                    <div style={{
+                      height: '100%',
+                      borderRadius: 10,
+                      background: m.avatar_color,
+                      width: `${Math.min((thisWeek / 40) * 100, 100)}%`,
+                      transition: 'width 0.5s'
+                    }} />
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 500, color: T.text }}>{thisWeek}h</div>
+                  <div style={{ fontSize: 10, color: diff > 0 ? '#2ecc71' : diff < 0 ? '#e74c3c' : T.textTertiary }}>
+                    {diff > 0 ? `↑ ${diff}h vs last week` : diff < 0 ? `↓ ${Math.abs(diff)}h vs last week` : 'Same as last week'}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Hours by project */}
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', color: T.textTertiary, marginBottom: 10 }}>
               Hours by project this week
             </div>
 
             {projectBreakdown.length === 0 ? (
-              <div style={{ fontSize: '11px', color: T.textTertiary, fontStyle: 'italic', textAlign: 'center', padding: '12px' }}>
+              <div style={{ fontSize: 11, color: T.textTertiary, fontStyle: 'italic', textAlign: 'center', padding: 12 }}>
                 No hours logged yet
               </div>
             ) : (
@@ -867,15 +1057,15 @@ export default function TimeView({ T, currentMember, members, projects }) {
                 const widthPercent = totalHours > 0 ? (pb.total_hours / totalHours) * 100 : 0;
 
                 return (
-                  <div key={pb.project_id} style={{ marginBottom: '8px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                      <span style={{ fontSize: '10px', color: T.textTertiary }}>{pb.project_name}</span>
-                      <span style={{ fontSize: '10px', color: T.textTertiary }}>{pb.total_hours}h</span>
+                  <div key={pb.project_id} style={{ marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 10, color: T.textTertiary }}>{pb.project_name}</span>
+                      <span style={{ fontSize: 10, color: T.textTertiary }}>{pb.total_hours}h</span>
                     </div>
                     <div style={{
-                      height: '4px',
+                      height: 4,
                       background: T.surfaceHover,
-                      borderRadius: '2px',
+                      borderRadius: 2,
                       overflow: 'hidden'
                     }}>
                       <div style={{

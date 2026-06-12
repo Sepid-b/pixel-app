@@ -180,7 +180,7 @@ export default function ProjectsView({ T, currentMember, members, projects, setP
       {/* Projects Grid */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(2, 1fr)',
+        gridTemplateColumns: 'repeat(4, 1fr)',
         gap: '10px',
         padding: '0 20px 20px'
       }}>
@@ -210,7 +210,7 @@ export default function ProjectsView({ T, currentMember, members, projects, setP
             >
               <div style={{ height: '6px', background: project.color }} />
 
-              <div style={{ padding: '14px 16px' }}>
+              <div style={{ padding: '12px 14px' }}>
                 {/* Header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '8px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -220,7 +220,7 @@ export default function ProjectsView({ T, currentMember, members, projects, setP
                       borderRadius: '2px',
                       background: project.color
                     }} />
-                    <div style={{ fontSize: '14px', fontWeight: '500', color: T.text }}>
+                    <div style={{ fontSize: '13px', fontWeight: '500', color: T.text }}>
                       {project.name}
                     </div>
                   </div>
@@ -381,7 +381,7 @@ export default function ProjectsView({ T, currentMember, members, projects, setP
             alignItems: 'center',
             justifyContent: 'center',
             cursor: 'pointer',
-            minHeight: '200px',
+            minHeight: 120,
             transition: 'border-color 0.2s'
           }}
           onMouseEnter={(e) => e.currentTarget.style.borderColor = T.primary}

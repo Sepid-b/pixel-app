@@ -33,7 +33,9 @@
       "Bash(npx acorn:*)",
       "Bash(if [ -f nul ])",
       "Bash(then rm nul)",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)"
     ]
   }
 }

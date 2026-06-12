@@ -43,7 +43,11 @@ export default function App() {
   const [members, setMembers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
-  const [vibes, setVibes] = useState([]);
+  const [vibes, setVibes] = useState({}); // { member_id: vibe_number }
+  const [myVibe, setMyVibe] = useState(3);
+  const [vibePickerOpen, setVibePickerOpen] = useState(false);
+  const [hoveredMember, setHoveredMember] = useState(null);
+  const [memberTasks, setMemberTasks] = useState({});
   const [activeView, setActiveView] = useState('board');
   const [sidebarFilter, setSidebarFilter] = useState(null);
   const [theme, setTheme] = useState('dark');
@@ -76,7 +80,9 @@ export default function App() {
   useEffect(() => {
     if (session?.user?.id && session?.user?.email) {
       identifyMember(session.user.id, session.user.email, session.user.user_metadata?.full_name);
-      loadMembers();
+      loadMembers().then(() => {
+        fetchMemberTasks();
+      });
       loadProjects();
       loadTasks();
       loadVibes();
@@ -86,6 +92,12 @@ export default function App() {
       return cleanup;
     }
   }, [session]);
+
+  useEffect(() => {
+    if (currentMember) {
+      loadMyVibe();
+    }
+  }, [currentMember]);
 
   const identifyMember = async (authId, email, name) => {
     try {
@@ -130,9 +142,62 @@ export default function App() {
   const loadVibes = async () => {
     try {
       const data = await api.getVibes();
-      setVibes(data);
+      const vibeMap = {};
+      data.forEach(d => {
+        if (d.member_id && d.vibe) vibeMap[d.member_id] = d.vibe;
+      });
+      setVibes(vibeMap);
     } catch (error) {
       console.error('Failed to load vibes:', error);
+    }
+  };
+
+  const loadMyVibe = async () => {
+    if (!currentMember) return;
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/standup/today`);
+      const data = await response.json();
+      const myStandup = data.find(d => d.member?.id === currentMember.id);
+      if (myStandup?.standup?.vibe) {
+        setMyVibe(myStandup.standup.vibe);
+      }
+    } catch (error) {
+      console.error('Failed to load my vibe:', error);
+    }
+  };
+
+  const fetchMemberTasks = async () => {
+    if (!members || members.length === 0) return;
+    try {
+      const taskMap = {};
+      await Promise.all(members.map(async (m) => {
+        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/tasks?member_id=${m.id}`);
+        const data = await res.json();
+        taskMap[m.id] = Array.isArray(data) ? data : [];
+      }));
+      setMemberTasks(taskMap);
+    } catch (error) {
+      console.error('Failed to fetch member tasks:', error);
+    }
+  };
+
+  const selectVibe = async (vibe) => {
+    setMyVibe(vibe);
+    setVibePickerOpen(false);
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL || ''}/api/standup/today`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          member_id: currentMember.id,
+          vibe,
+          blockers: '',
+          note: ''
+        })
+      });
+      await loadVibes();
+    } catch (error) {
+      console.error('Failed to save vibe:', error);
     }
   };
 
@@ -141,6 +206,10 @@ export default function App() {
       .channel('tasks-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'px_tasks' }, () => {
         loadTasks();
+        fetchMemberTasks();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'px_standups' }, () => {
+        loadVibes();
       })
       .subscribe();
 
@@ -211,6 +280,29 @@ export default function App() {
     }
   }, [profileOpen]);
 
+  // Close vibe picker on outside click
+  useEffect(() => {
+    if (!vibePickerOpen) return;
+
+    let handler;
+    // Add delay to prevent the same click that opened it from closing it
+    const timeout = setTimeout(() => {
+      handler = (e) => {
+        if (!e.target.closest('.vibe-strip-container')) {
+          setVibePickerOpen(false);
+        }
+      };
+      document.addEventListener('click', handler);
+    }, 100);
+
+    return () => {
+      clearTimeout(timeout);
+      if (handler) {
+        document.removeEventListener('click', handler);
+      }
+    };
+  }, [vibePickerOpen]);
+
   if (!session) {
     return <Login onLogin={setSession} />;
   }
@@ -229,6 +321,77 @@ export default function App() {
       </div>
     );
   }
+
+  const VibeAvatar = ({ member, size = 28, vibe, onClick, onHover, onLeave }) => {
+    const [showEmoji, setShowEmoji] = useState(false);
+    const emojis = ['😩', '😔', '😐', '😊', '🔥'];
+    const emoji = emojis[(vibe || 3) - 1];
+
+    return (
+      <div
+        onClick={onClick}
+        onMouseEnter={() => {
+          setShowEmoji(true);
+          onHover && onHover(member);
+        }}
+        onMouseLeave={() => {
+          setShowEmoji(false);
+          onLeave && onLeave();
+        }}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: '50%',
+          position: 'relative',
+          overflow: 'hidden',
+          border: `2px solid ${currentTheme.surface}`,
+          boxShadow: `0 0 0 1.5px ${currentTheme.surface}, 0 0 0 3px ${member.avatar_color}`,
+          cursor: 'pointer',
+          flexShrink: 0,
+          transition: 'transform 0.15s',
+          zIndex: 1
+        }}
+        onMouseOver={e => e.currentTarget.style.transform = 'scale(1.15)'}
+        onMouseOut={e => e.currentTarget.style.transform = 'scale(1)'}
+      >
+        {/* Letter face */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: member.avatar_color,
+          fontSize: size * 0.38,
+          fontWeight: 600,
+          color: '#fff',
+          transition: 'transform 0.3s ease, opacity 0.3s ease',
+          transform: showEmoji ? 'translateY(-100%)' : 'translateY(0)',
+          opacity: showEmoji ? 0 : 1,
+          userSelect: 'none'
+        }}>
+          {member.name[0].toUpperCase()}
+        </div>
+
+        {/* Emoji face */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: member.avatar_color,
+          fontSize: size * 0.55,
+          transition: 'transform 0.3s ease, opacity 0.3s ease',
+          transform: showEmoji ? 'translateY(0)' : 'translateY(100%)',
+          opacity: showEmoji ? 1 : 0,
+          userSelect: 'none'
+        }}>
+          {emoji}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div style={{
@@ -307,7 +470,161 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <VibeStrip vibes={vibes} members={members} />
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }} className="vibe-strip-container">
+
+            {/* Overlapping avatar strip */}
+            <div style={{ display: 'flex', alignItems: 'center' }}>
+              {members.map((member, i) => (
+                <div key={member.id} style={{ marginLeft: i === 0 ? 0 : -8, zIndex: members.length - i }}>
+                  <VibeAvatar
+                    member={member}
+                    size={28}
+                    vibe={vibes[member.id] || 3}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (member.id === currentMember?.id) {
+                        setVibePickerOpen(v => !v);
+                        setHoveredMember(null);
+                      }
+                    }}
+                    onHover={(m) => {
+                      if (m.id !== currentMember?.id) setHoveredMember(m);
+                    }}
+                    onLeave={() => setHoveredMember(null)}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {/* YOUR vibe picker — opens when you click your own avatar */}
+            {vibePickerOpen && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute',
+                  top: 38,
+                  right: 0,
+                  zIndex: 1000,
+                  background: currentTheme.surface,
+                  border: `.5px solid ${currentTheme.border}`,
+                  borderRadius: 10,
+                  padding: 16,
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                  minWidth: 220
+                }}>
+                <div style={{ fontSize: 12, color: currentTheme.text, fontWeight: 500, marginBottom: 4 }}>
+                  How are you feeling today?
+                </div>
+                <div style={{ fontSize: 11, color: currentTheme.textTertiary, marginBottom: 12 }}>
+                  {['Drained', 'Tired', 'Neutral', 'Good', 'On fire 🔥'][(vibes[currentMember?.id] || 3) - 1]}
+                </div>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                  {['😩', '😔', '😐', '😊', '🔥'].map((emoji, i) => (
+                    <div key={i} onClick={async (e) => {
+                      e.stopPropagation();
+                      const newVibe = i + 1;
+                      // update state immediately for instant feedback
+                      setVibes(prev => ({ ...prev, [currentMember.id]: newVibe }));
+                      setVibePickerOpen(false);
+                      // save to backend
+                      try {
+                        await fetch(`${import.meta.env.VITE_API_URL || ''}/api/standup/today`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            member_id: currentMember.id,
+                            vibe: newVibe,
+                            blockers: '',
+                            note: ''
+                          })
+                        });
+                        // refetch vibes to confirm
+                        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/standups/vibes`);
+                        const data = await res.json();
+                        const vibeMap = {};
+                        data.forEach(d => { if (d.member_id && d.vibe) vibeMap[d.member_id] = d.vibe; });
+                        setVibes(vibeMap);
+                      } catch (err) {
+                        console.error('Vibe save error:', err);
+                      }
+                    }} style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: '50%',
+                      background: (vibes[currentMember?.id] || 3) === i + 1
+                        ? 'rgba(124,107,240,0.15)' : currentTheme.surfaceHover,
+                      border: (vibes[currentMember?.id] || 3) === i + 1
+                        ? '2px solid #7c6bf0' : `.5px solid ${currentTheme.border}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 22,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}>{emoji}</div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* TEAMMATE popup — shows on hover of another member's avatar */}
+            {hoveredMember && (
+              <div style={{
+                position: 'absolute',
+                top: 38,
+                right: 0,
+                zIndex: 100,
+                background: currentTheme.surface,
+                border: `.5px solid ${currentTheme.border}`,
+                borderRadius: 10,
+                padding: 14,
+                boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                minWidth: 200,
+                pointerEvents: 'none'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <div style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    background: hoveredMember.avatar_color,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#fff'
+                  }}>{hoveredMember.name[0]}</div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: currentTheme.text }}>{hoveredMember.name}</div>
+                    <div style={{ fontSize: 16 }}>
+                      {['😩', '😔', '😐', '😊', '🔥'][(vibes[hoveredMember.id] || 3) - 1]}
+                      <span style={{ fontSize: 11, color: currentTheme.textTertiary, marginLeft: 6 }}>
+                        {['Drained', 'Tired', 'Neutral', 'Good', 'On fire 🔥'][(vibes[hoveredMember.id] || 3) - 1]}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                {/* Their current tasks */}
+                <div style={{ fontSize: 10, color: currentTheme.textTertiary, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 5 }}>
+                  Working on
+                </div>
+                {(memberTasks[hoveredMember.id] || [])
+                  .filter(t => t.status === 'in_progress')
+                  .slice(0, 2)
+                  .map(t => (
+                    <div key={t.id} style={{ fontSize: 11, color: currentTheme.textSecondary, padding: '2px 0' }}>
+                      · {t.title}
+                    </div>
+                  ))
+                }
+                {!(memberTasks[hoveredMember.id] || []).filter(t => t.status === 'in_progress').length && (
+                  <div style={{ fontSize: 11, color: currentTheme.textTertiary }}>Nothing in progress</div>
+                )}
+              </div>
+            )}
+
+          </div>
 
           <button
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -774,56 +1091,3 @@ function SidebarItem({ icon, label, theme, active, onClick }) {
   );
 }
 
-function VibeStrip({ vibes, members }) {
-  const [showEmoji, setShowEmoji] = useState(false);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setShowEmoji(prev => !prev);
-    }, 4500);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const vibeToEmoji = {
-    1: '😩',
-    2: '😔',
-    3: '😐',
-    4: '😊',
-    5: '🔥'
-  };
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-      {vibes.map((vibe, index) => {
-        const member = members.find(m => m.id === vibe.member_id);
-        if (!member) return null;
-
-        return (
-          <div
-            key={vibe.id}
-            style={{
-              width: '28px',
-              height: '28px',
-              borderRadius: '50%',
-              background: member.avatar_color,
-              border: `2px solid ${member.avatar_color}`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'white',
-              fontSize: '12px',
-              fontWeight: '600',
-              marginLeft: index > 0 ? '-8px' : '0',
-              position: 'relative',
-              zIndex: vibes.length - index,
-              transition: 'all 0.3s'
-            }}
-          >
-            {showEmoji ? vibeToEmoji[vibe.vibe] : member.name[0]}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
