@@ -74,7 +74,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (session?.user) {
+    if (session?.user?.id && session?.user?.email) {
       identifyMember(session.user.id, session.user.email, session.user.user_metadata?.full_name);
       loadMembers();
       loadProjects();
@@ -89,7 +89,9 @@ export default function App() {
 
   const identifyMember = async (authId, email, name) => {
     try {
+      console.log('[DEBUG] App.jsx - identifyMember() called with:', { authId, email, name });
       const member = await api.identifyMember(authId, email, name);
+      console.log('[DEBUG] App.jsx - identifyMember() received member:', member);
       setCurrentMember(member);
     } catch (error) {
       console.error('Failed to identify member:', error);
@@ -107,7 +109,9 @@ export default function App() {
 
   const loadProjects = async () => {
     try {
+      console.log('[DEBUG] App.jsx - loadProjects() called');
       const data = await api.getProjects();
+      console.log('[DEBUG] App.jsx - loadProjects() received data:', data);
       setProjects(data);
     } catch (error) {
       console.error('Failed to load projects:', error);
@@ -159,7 +163,7 @@ export default function App() {
     try {
       const updates = {
         name: editForm.name,
-        avatar_color: editForm.avatar_color,
+        avatar_color: editForm.avatar_color
       };
 
       const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/members/${currentMember.id}`, {
@@ -167,6 +171,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
       });
+
+      if (!response.ok) {
+        throw new Error('Failed to update profile');
+      }
 
       const updated = await response.json();
 
@@ -207,7 +215,7 @@ export default function App() {
     return <Login onLogin={setSession} />;
   }
 
-  if (!currentMember) {
+  if (!currentMember || !currentMember.name) {
     return (
       <div style={{
         minHeight: '100vh',
@@ -662,6 +670,7 @@ export default function App() {
               tasks={tasks}
               members={members}
               projects={projects}
+              setProjects={setProjects}
               currentMember={currentMember}
               theme={currentTheme}
               filters={filters}
@@ -705,6 +714,7 @@ export default function App() {
               members={members}
               projects={projects}
               setProjects={setProjects}
+              onProjectsChange={loadProjects}
             />
           )}
           {activeView === 'members' && (

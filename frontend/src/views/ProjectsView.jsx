@@ -5,7 +5,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const presetColors = ['#e84393', '#7c6bf0', '#2ecc71', '#f39c12', '#3498db', '#e74c3c', '#5DCAA5', '#f0997b'];
 
-export default function ProjectsView({ T, currentMember, members, projects, setProjects }) {
+export default function ProjectsView({ T, currentMember, members, projects, setProjects, onProjectsChange }) {
   const [stats, setStats] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [showNewProject, setShowNewProject] = useState(false);
@@ -13,33 +13,25 @@ export default function ProjectsView({ T, currentMember, members, projects, setP
     name: '',
     color: '#7c6bf0',
     description: '',
-    budget_hours: '',
     member_ids: [currentMember.id]
   });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    console.log('[DEBUG] ProjectsView - useEffect triggered, currentMember:', currentMember);
+    console.log('[DEBUG] ProjectsView - projects prop:', projects);
     loadStats();
-    loadProjects();
   }, [currentMember]);
 
   const loadStats = async () => {
     try {
+      console.log('[DEBUG] ProjectsView - loadStats() called for member:', currentMember.id);
       const response = await fetch(`${API_BASE}/api/projects/stats?member_id=${currentMember.id}`);
       const data = await response.json();
+      console.log('[DEBUG] ProjectsView - loadStats() received:', data);
       setStats(data);
     } catch (error) {
       console.error('Failed to load stats:', error);
-    }
-  };
-
-  const loadProjects = async () => {
-    try {
-      const response = await fetch(`${API_BASE}/api/projects?member_id=${currentMember.id}`);
-      const data = await response.json();
-      setProjects(data);
-    } catch (error) {
-      console.error('Failed to load projects:', error);
     }
   };
 
@@ -48,13 +40,15 @@ export default function ProjectsView({ T, currentMember, members, projects, setP
 
     setSaving(true);
     try {
+      console.log('[DEBUG] ProjectsView - Creating project:', newProject);
       const response = await fetch(`${API_BASE}/api/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newProject)
       });
       const created = await response.json();
-      setProjects([...projects, created]);
+      console.log('[DEBUG] ProjectsView - Created project:', created);
+
       setShowNewProject(false);
       setNewProject({
         name: '',
@@ -63,6 +57,11 @@ export default function ProjectsView({ T, currentMember, members, projects, setP
         budget_hours: '',
         member_ids: [currentMember.id]
       });
+
+      // Reload projects from parent and stats
+      if (onProjectsChange) {
+        await onProjectsChange();
+      }
       await loadStats();
     } catch (error) {
       console.error('Failed to create project:', error);
@@ -511,29 +510,6 @@ export default function ProjectsView({ T, currentMember, members, projects, setP
                     resize: 'vertical',
                     minHeight: '80px',
                     fontFamily: 'inherit'
-                  }}
-                />
-              </div>
-
-              {/* Budget Hours */}
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', marginBottom: '6px', color: T.text }}>
-                  Budget Hours
-                </label>
-                <input
-                  type="number"
-                  value={newProject.budget_hours}
-                  onChange={(e) => setNewProject({ ...newProject, budget_hours: e.target.value })}
-                  placeholder="Optional"
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    background: T.background,
-                    border: `0.5px solid ${T.border}`,
-                    borderRadius: '4px',
-                    color: T.text,
-                    fontSize: '13px',
-                    outline: 'none'
                   }}
                 />
               </div>

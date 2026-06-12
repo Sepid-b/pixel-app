@@ -81,7 +81,7 @@ export default function MembersView({ T, currentMember, members, setMembers }) {
       {/* Members Grid */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(2, 1fr)',
+        gridTemplateColumns: 'repeat(4, 1fr)',
         gap: '10px',
         padding: '16px 20px'
       }}>

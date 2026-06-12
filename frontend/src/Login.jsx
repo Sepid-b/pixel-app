@@ -61,7 +61,7 @@ export default function Login({ onLogin }) {
     }
 
     try {
-      // Create Supabase auth user
+      // 1. Create auth user only
       const { data, error: authError } = await supabase.auth.signUp({
         email: email.toLowerCase(),
         password,
@@ -79,28 +79,24 @@ export default function Login({ onLogin }) {
         throw authError;
       }
 
-      // Get available avatar color
-      const { data: existingMembers } = await supabase
-        .from('px_members')
-        .select('avatar_color');
-
-      const usedColors = existingMembers?.map(m => m.avatar_color) || [];
-      const availableColor = avatarColors.find(c => !usedColors.includes(c)) || avatarColors[0];
-
-      // Create px_members row
-      const { error: memberError } = await supabase
-        .from('px_members')
-        .insert({
-          user_id: data.user.id,
+      // 2. Call backend to create member (backend uses service role key, bypasses RLS)
+      const API_BASE = import.meta.env.VITE_API_URL || '';
+      const memberResponse = await fetch(`${API_BASE}/api/members/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auth_id: data.user.id,
           name: name.trim(),
-          email: email.toLowerCase(),
-          avatar_color: availableColor,
-          role: 'member'
-        });
+          email: email.toLowerCase()
+        })
+      });
 
-      if (memberError) throw memberError;
+      if (!memberResponse.ok) {
+        const error = await memberResponse.json();
+        throw new Error(error.error || 'Failed to create member');
+      }
 
-      // Show success and switch to sign in
+      // 3. Show success and switch to sign in
       setSuccess('Account created! You can now sign in.');
       setName('');
       setPassword('');

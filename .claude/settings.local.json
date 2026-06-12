@@ -21,7 +21,19 @@
       "Bash(netstat:*)",
       "Bash(findstr:*)",
       "Bash(taskkill:*)",
-      "mcp__claude_ai_Supabase__list_projects"
+      "mcp__claude_ai_Supabase__list_projects",
+      "Bash(git push:*)",
+      "Bash(timeout:*)",
+      "Bash(ping:*)",
+      "mcp__claude_ai_Supabase__get_project",
+      "mcp__claude_ai_Supabase__list_tables",
+      "Bash(node:*)",
+      "Bash(curl:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx acorn:*)",
+      "Bash(if [ -f nul ])",
+      "Bash(then rm nul)",
+      "Bash(fi)"
     ]
   }
 }

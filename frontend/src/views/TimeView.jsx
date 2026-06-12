@@ -23,10 +23,11 @@ export default function TimeView({ T, currentMember, members, projects }) {
     project_id: '',
     date: new Date().toISOString().split('T')[0],
     hours: '',
-    note: ''
+    notes: ''
   });
   const [tasks, setTasks] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [heatmapData, setHeatmapData] = useState([]);
 
   useEffect(() => {
     if (currentMember) {
@@ -36,6 +37,14 @@ export default function TimeView({ T, currentMember, members, projects }) {
       loadTasks();
     }
   }, [weekStart, currentMember]);
+
+  useEffect(() => {
+    if (!selectedMember) return;
+    fetch(`${API_BASE}/api/time/heatmap?member_id=${selectedMember.id}`)
+      .then(r => r.json())
+      .then(setHeatmapData)
+      .catch(err => console.error('Failed to load heatmap:', err));
+  }, [selectedMember]);
 
   const loadTimeData = async () => {
     try {
@@ -76,7 +85,7 @@ export default function TimeView({ T, currentMember, members, projects }) {
       member_id: currentMember.id,
       date: form.date,
       hours: parseFloat(form.hours),
-      note: form.note || null
+      notes: form.notes || null
     };
 
     if (logType === 'task') {
@@ -101,7 +110,7 @@ export default function TimeView({ T, currentMember, members, projects }) {
       setForm({
         ...form,
         hours: '',
-        note: ''
+        notes: ''
       });
       await loadTimeData();
       await loadStats();
@@ -180,6 +189,43 @@ export default function TimeView({ T, currentMember, members, projects }) {
 
   const sortedDates = Object.keys(entriesByDate).sort((a, b) => new Date(b) - new Date(a));
 
+  const buildHeatmapGrid = () => {
+    const weeks = 12;
+    const today = new Date();
+
+    // Map heatmap data by date string
+    const hoursMap = {};
+    heatmapData.forEach(d => { hoursMap[d.date] = d.hours });
+
+    // Find max hours for color scaling
+    const maxHours = Math.max(...Object.values(hoursMap), 1);
+
+    // Build array of week columns
+    const grid = [];
+    for (let w = weeks - 1; w >= 0; w--) {
+      const week = [];
+      for (let d = 0; d < 7; d++) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - (w * 7) - (6 - d));
+        const dateStr = date.toISOString().split('T')[0];
+        const hours = hoursMap[dateStr] || 0;
+        week.push({ date: dateStr, hours, intensity: hours / maxHours });
+      }
+      grid.push(week);
+    }
+    return { grid };
+  };
+
+  const getColor = (intensity) => {
+    if (intensity === 0) return T.bg3 || T.surfaceHover;
+    if (intensity < 0.25) return 'rgba(124,107,240,0.2)';
+    if (intensity < 0.5)  return 'rgba(124,107,240,0.45)';
+    if (intensity < 0.75) return 'rgba(124,107,240,0.7)';
+    return '#7c6bf0';
+  };
+
+  const { grid } = buildHeatmapGrid();
+
   return (
     <div style={{ padding: 0 }}>
       {/* Page Header */}
@@ -252,6 +298,98 @@ export default function TimeView({ T, currentMember, members, projects }) {
         >
           + Log hours
         </button>
+      </div>
+
+      {/* Activity Heatmap */}
+      <div style={{ padding: '16px 20px 0' }}>
+        <div style={{
+          background: T.card,
+          border: `.5px solid ${T.border}`,
+          borderRadius: '10px',
+          padding: '16px',
+          marginBottom: '14px'
+        }}>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+            <div style={{ fontSize: '13px', fontWeight: '500', color: T.text }}>Activity overview</div>
+            {/* Member switcher */}
+            <div style={{ display: 'flex', gap: '4px' }}>
+              {members.map(m => (
+                <div
+                  key={m.id}
+                  onClick={() => setSelectedMember(m)}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '50%',
+                    background: m.avatar_color,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '9px',
+                    fontWeight: '600',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    border: selectedMember?.id === m.id ? `1.5px solid #7c6bf0` : '1.5px solid transparent',
+                    boxShadow: selectedMember?.id === m.id ? `0 0 0 1.5px ${T.card}, 0 0 0 3px #7c6bf0` : 'none'
+                  }}
+                >
+                  {m.name[0]}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Grid */}
+          <div style={{ display: 'flex', gap: '3px' }}>
+            {/* Day labels on left */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginRight: '4px' }}>
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
+                <div key={d} style={{
+                  height: '12px',
+                  fontSize: '9px',
+                  color: T.textTertiary,
+                  display: 'flex',
+                  alignItems: 'center',
+                  width: '24px'
+                }}>
+                  {d}
+                </div>
+              ))}
+            </div>
+
+            {/* Week columns */}
+            {grid.map((week, wi) => (
+              <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                {week.map((cell, di) => (
+                  <div
+                    key={di}
+                    title={`${cell.date}: ${cell.hours}h`}
+                    style={{
+                      width: '12px',
+                      height: '12px',
+                      borderRadius: '2px',
+                      background: getColor(cell.intensity),
+                      cursor: cell.hours > 0 ? 'pointer' : 'default',
+                      transition: 'transform 0.1s'
+                    }}
+                    onMouseEnter={e => { if (cell.hours > 0) e.target.style.transform = 'scale(1.3)' }}
+                    onMouseLeave={e => e.target.style.transform = 'scale(1)'}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {/* Legend */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '10px', justifyContent: 'flex-end' }}>
+            <span style={{ fontSize: '9px', color: T.textTertiary }}>Less</span>
+            {[0, 0.25, 0.5, 0.75, 1].map((i, idx) => (
+              <div key={idx} style={{ width: '10px', height: '10px', borderRadius: '2px', background: getColor(i) }} />
+            ))}
+            <span style={{ fontSize: '9px', color: T.textTertiary }}>More</span>
+          </div>
+        </div>
       </div>
 
       {/* Team Stats Row */}
@@ -500,9 +638,9 @@ export default function TimeView({ T, currentMember, members, projects }) {
                         <span style={{ flex: 1, fontSize: '11px', color: T.textSecondary }}>
                           {entry.task_title || entry.project_name || 'General'}
                         </span>
-                        {entry.note && (
+                        {entry.notes && (
                           <span style={{ fontSize: '10px', color: T.textTertiary, fontStyle: 'italic', marginLeft: 'auto' }}>
-                            {entry.note}
+                            {entry.notes}
                           </span>
                         )}
                         <span style={{ fontSize: '12px', fontWeight: '500', color: T.text, marginLeft: 'auto' }}>
@@ -671,8 +809,8 @@ export default function TimeView({ T, currentMember, members, projects }) {
 
             <textarea
               placeholder="Note (optional)"
-              value={form.note}
-              onChange={(e) => setForm({ ...form, note: e.target.value })}
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
               style={{
                 width: '100%',
                 padding: '8px 10px',

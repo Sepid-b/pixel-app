@@ -12,7 +12,7 @@ const statusLabels = {
   'done': 'Done'
 };
 
-export default function BoardView({ tasks, members, projects, currentMember, theme, filters, setFilters, sidebarFilter, setSidebarFilter, onTasksChange }) {
+export default function BoardView({ tasks, members, projects, setProjects, currentMember, theme, filters, setFilters, sidebarFilter, setSidebarFilter, onTasksChange }) {
   const [showNewTaskModal, setShowNewTaskModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [draggedTask, setDraggedTask] = useState(null);
@@ -286,11 +286,150 @@ export default function BoardView({ tasks, members, projects, currentMember, the
           theme={theme}
           members={members}
           projects={projects}
+          setProjects={setProjects}
           tags={tags}
+          setTags={setTags}
           currentMember={currentMember}
           onClose={() => setSelectedTask(null)}
           onSave={onTasksChange}
         />
+      )}
+    </div>
+  );
+}
+
+function ProjectDropdown({ value, onChange, projects, theme, onNewProject }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const selectedProject = projects.find(p => p.id === value);
+
+  return (
+    <div ref={dropdownRef} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          width: '100%',
+          padding: '6px 10px',
+          background: theme.background,
+          border: `0.5px solid ${theme.border}`,
+          borderRadius: '4px',
+          color: theme.text,
+          fontSize: '12px',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          textAlign: 'left'
+        }}
+      >
+        <span>{selectedProject ? selectedProject.name : 'None'}</span>
+        <ChevronDown size={14} />
+      </button>
+
+      {isOpen && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 4px)',
+          left: 0,
+          right: 0,
+          background: theme.surface,
+          border: `0.5px solid ${theme.border}`,
+          borderRadius: '6px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 1000,
+          maxHeight: '250px',
+          overflowY: 'auto'
+        }}>
+          <div
+            onClick={() => {
+              onChange('');
+              setIsOpen(false);
+            }}
+            style={{
+              padding: '8px 12px',
+              fontSize: '12px',
+              cursor: 'pointer',
+              background: value === '' ? theme.surfaceHover : 'transparent',
+              color: theme.text
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = theme.surfaceHover}
+            onMouseLeave={(e) => {
+              if (value !== '') {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+          >
+            None
+          </div>
+          {projects.map(project => (
+            <div
+              key={project.id}
+              onClick={() => {
+                onChange(project.id);
+                setIsOpen(false);
+              }}
+              style={{
+                padding: '8px 12px',
+                fontSize: '12px',
+                cursor: 'pointer',
+                background: value === project.id ? theme.surfaceHover : 'transparent',
+                color: theme.text,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = theme.surfaceHover}
+              onMouseLeave={(e) => {
+                if (value !== project.id) {
+                  e.currentTarget.style.background = 'transparent';
+                }
+              }}
+            >
+              <div style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '2px',
+                background: project.color
+              }} />
+              {project.name}
+            </div>
+          ))}
+          <div
+            onClick={() => {
+              setIsOpen(false);
+              onNewProject();
+            }}
+            style={{
+              padding: '8px 12px',
+              fontSize: '12px',
+              cursor: 'pointer',
+              background: 'transparent',
+              color: theme.primary,
+              borderTop: `0.5px solid ${theme.border}`,
+              fontWeight: '500',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = theme.surfaceHover}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+          >
+            <Plus size={14} />
+            New project
+          </div>
+        </div>
       )}
     </div>
   );
@@ -850,7 +989,7 @@ function NewTaskModal({ theme, members, projects, currentMember, onClose, onSave
   );
 }
 
-function TaskDetailModal({ task, theme, members, projects, tags, currentMember, onClose, onSave }) {
+function TaskDetailModal({ task, theme, members, projects, setProjects, tags, setTags, currentMember, onClose, onSave }) {
   const [formData, setFormData] = useState({
     title: task.title || '',
     description: task.description || '',
@@ -874,10 +1013,36 @@ function TaskDetailModal({ task, theme, members, projects, tags, currentMember, 
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(null);
 
+  // Fix 2: New project modal state
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [newProjectForm, setNewProjectForm] = useState({ name: '', color: '#7c6bf0' });
+  const [projectError, setProjectError] = useState('');
+  const [savingProject, setSavingProject] = useState(false);
+
+  // Fix 3: @mention state
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionSearch, setMentionSearch] = useState('');
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const commentInputRef = useRef(null);
+
+  // Fix 4: New tag state
+  const [showNewTag, setShowNewTag] = useState(false);
+  const [newTagForm, setNewTagForm] = useState({ name: '', color: '#a259ff' });
+  const [tagError, setTagError] = useState('');
+  const [savingTag, setSavingTag] = useState(false);
+
+  // Local state for instant UI updates
+  const [localTaskTags, setLocalTaskTags] = useState(task.tags || []);
+
   useEffect(() => {
     loadComments();
     loadDocs();
   }, [task.id]);
+
+  // Sync localTaskTags when task.tags changes from parent
+  useEffect(() => {
+    setLocalTaskTags(task.tags || []);
+  }, [task.tags]);
 
   const loadComments = async () => {
     try {
@@ -946,7 +1111,17 @@ function TaskDetailModal({ task, theme, members, projects, tags, currentMember, 
   };
 
   const handleToggleTag = async (tagId) => {
-    const hasTag = task.tags?.some(t => t.id === tagId);
+    const hasTag = localTaskTags.some(t => t.id === tagId);
+    const tagToToggle = tags.find(t => t.id === tagId);
+
+    // Optimistic update - update UI immediately
+    if (hasTag) {
+      setLocalTaskTags(localTaskTags.filter(t => t.id !== tagId));
+    } else {
+      setLocalTaskTags([...localTaskTags, tagToToggle]);
+    }
+
+    // Make API call in background
     try {
       if (hasTag) {
         await api.removeTaskTag(task.id, tagId);
@@ -956,7 +1131,163 @@ function TaskDetailModal({ task, theme, members, projects, tags, currentMember, 
       await onSave();
     } catch (error) {
       console.error('Failed to toggle tag:', error);
+
+      // Don't revert on duplicate key error (tag already exists)
+      const isDuplicateError = error.message?.includes('duplicate key') || error.message?.includes('already exists');
+
+      if (!isDuplicateError) {
+        // Only revert on real errors, not duplicate key
+        if (hasTag) {
+          setLocalTaskTags([...localTaskTags, tagToToggle]);
+        } else {
+          setLocalTaskTags(localTaskTags.filter(t => t.id !== tagId));
+        }
+      } else {
+        // Duplicate error when adding means it's already there, so keep it in applied
+        // Duplicate error when removing is rare but reload to sync
+        await onSave();
+      }
     }
+  };
+
+  // Fix 2: Create new project
+  const handleCreateProject = async () => {
+    if (!newProjectForm.name.trim()) {
+      setProjectError('Project name is required');
+      return;
+    }
+
+    setSavingProject(true);
+    setProjectError('');
+
+    try {
+      const newProject = await api.createProject(newProjectForm);
+      setProjects([...projects, newProject]);
+      setFormData({ ...formData, project_id: newProject.id });
+      setShowNewProjectModal(false);
+      setNewProjectForm({ name: '', color: '#7c6bf0' });
+    } catch (err) {
+      setProjectError(err.message);
+    } finally {
+      setSavingProject(false);
+    }
+  };
+
+  // Fix 3: Handle @mention in comment input
+  const handleCommentChange = (e) => {
+    const value = e.target.value;
+    setNewComment(value);
+
+    const cursorPos = e.target.selectionStart;
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+
+    if (lastAtIndex !== -1 && lastAtIndex === textBeforeCursor.length - 1) {
+      // Just typed @
+      setShowMentions(true);
+      setMentionSearch('');
+      setMentionIndex(0);
+    } else if (lastAtIndex !== -1) {
+      const afterAt = textBeforeCursor.slice(lastAtIndex + 1);
+      if (!afterAt.includes(' ')) {
+        // Still typing a mention
+        setShowMentions(true);
+        setMentionSearch(afterAt.toLowerCase());
+        setMentionIndex(0);
+      } else {
+        setShowMentions(false);
+      }
+    } else {
+      setShowMentions(false);
+    }
+  };
+
+  const handleMentionSelect = (member) => {
+    const cursorPos = commentInputRef.current.selectionStart;
+    const textBeforeCursor = newComment.slice(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+
+    const beforeMention = newComment.slice(0, lastAtIndex);
+    const afterCursor = newComment.slice(cursorPos);
+
+    const newText = beforeMention + '@' + member.name + ' ' + afterCursor;
+    setNewComment(newText);
+    setShowMentions(false);
+    setMentionSearch('');
+
+    setTimeout(() => {
+      commentInputRef.current?.focus();
+    }, 0);
+  };
+
+  const handleMentionKeyDown = (e) => {
+    if (!showMentions) return;
+
+    const filteredMembers = members.filter(m =>
+      m.name.toLowerCase().includes(mentionSearch)
+    );
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setMentionIndex((prev) => (prev + 1) % filteredMembers.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setMentionIndex((prev) => (prev - 1 + filteredMembers.length) % filteredMembers.length);
+    } else if (e.key === 'Enter' && filteredMembers.length > 0) {
+      e.preventDefault();
+      handleMentionSelect(filteredMembers[mentionIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowMentions(false);
+    }
+  };
+
+  // Fix 4: Create new tag
+  const handleCreateTag = async () => {
+    if (!newTagForm.name.trim()) {
+      setTagError('Tag name is required');
+      return;
+    }
+
+    setSavingTag(true);
+    setTagError('');
+
+    let newTag = null;
+    try {
+      newTag = await api.createTag(newTagForm);
+      setTags([...tags, newTag]);
+
+      // Optimistically add to localTaskTags immediately
+      setLocalTaskTags([...localTaskTags, newTag]);
+
+      await api.addTaskTag(task.id, newTag.id);
+      await onSave();
+      setShowNewTag(false);
+      setNewTagForm({ name: '', color: '#a259ff' });
+    } catch (err) {
+      setTagError(err.message);
+      // Revert optimistic update on error (if tag was created)
+      if (newTag) {
+        setLocalTaskTags(localTaskTags.filter(t => t.id !== newTag.id));
+      }
+    } finally {
+      setSavingTag(false);
+    }
+  };
+
+  // Helper to render comment with @mentions highlighted
+  const renderCommentWithMentions = (text) => {
+    const parts = text.split(/(@\w+)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('@')) {
+        return (
+          <span key={i} style={{ color: '#7c6bf0', fontWeight: '500' }}>
+            {part}
+          </span>
+        );
+      }
+      return part;
+    });
   };
 
   const getIconForUrl = (url) => {
@@ -1162,13 +1493,16 @@ function TaskDetailModal({ task, theme, members, projects, tags, currentMember, 
                       href={doc.url}
                       target="_blank"
                       rel="noopener noreferrer"
+                      title={doc.title || doc.url}
                       style={{
                         color: theme.text,
-                        fontSize: '13px',
+                        fontSize: '11px',
+                        fontWeight: '500',
                         textDecoration: 'none',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
+                        whiteSpace: 'nowrap',
+                        maxWidth: '160px'
                       }}
                     >
                       {doc.title || doc.url}
@@ -1446,43 +1780,104 @@ function TaskDetailModal({ task, theme, members, projects, tags, currentMember, 
                     </span>
                   </div>
                   <div style={{ fontSize: '13px', color: theme.text, marginLeft: '26px' }}>
-                    {comment.content}
+                    {renderCommentWithMentions(comment.content)}
                   </div>
                 </div>
               ))}
             </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                type="text"
-                placeholder="Add a comment..."
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleAddComment()}
-                style={{
-                  flex: 1,
-                  padding: '8px 12px',
-                  background: theme.background,
+            <div style={{ position: 'relative' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  ref={commentInputRef}
+                  type="text"
+                  placeholder="Add a comment... (use @ to mention)"
+                  value={newComment}
+                  onChange={handleCommentChange}
+                  onKeyDown={handleMentionKeyDown}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter' && !showMentions) {
+                      handleAddComment();
+                    }
+                  }}
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    background: theme.background,
+                    border: `0.5px solid ${theme.border}`,
+                    borderRadius: '4px',
+                    color: theme.text,
+                    fontSize: '13px',
+                    outline: 'none'
+                  }}
+                />
+                <button
+                  onClick={handleAddComment}
+                  style={{
+                    padding: '8px 16px',
+                    background: theme.primary,
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    fontSize: '13px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Send
+                </button>
+              </div>
+
+              {/* Mention dropdown */}
+              {showMentions && (
+                <div style={{
+                  position: 'absolute',
+                  bottom: 'calc(100% + 4px)',
+                  left: 0,
+                  background: theme.surface,
                   border: `0.5px solid ${theme.border}`,
-                  borderRadius: '4px',
-                  color: theme.text,
-                  fontSize: '13px',
-                  outline: 'none'
-                }}
-              />
-              <button
-                onClick={handleAddComment}
-                style={{
-                  padding: '8px 16px',
-                  background: theme.primary,
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  fontSize: '13px',
-                  cursor: 'pointer'
-                }}
-              >
-                Send
-              </button>
+                  borderRadius: '6px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  minWidth: '200px',
+                  maxHeight: '200px',
+                  overflowY: 'auto',
+                  zIndex: 1001
+                }}>
+                  {members
+                    .filter(m => m.name.toLowerCase().includes(mentionSearch))
+                    .map((member, idx) => (
+                      <div
+                        key={member.id}
+                        onClick={() => handleMentionSelect(member)}
+                        style={{
+                          padding: '8px 12px',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          background: idx === mentionIndex ? theme.surfaceHover : 'transparent',
+                          color: theme.text,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}
+                        onMouseEnter={() => setMentionIndex(idx)}
+                      >
+                        <div style={{
+                          width: '20px',
+                          height: '20px',
+                          borderRadius: '50%',
+                          background: member.avatar_color,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'white',
+                          fontSize: '10px',
+                          fontWeight: '600'
+                        }}>
+                          {member.name[0]}
+                        </div>
+                        {member.name}
+                      </div>
+                    ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1557,25 +1952,13 @@ function TaskDetailModal({ task, theme, members, projects, tags, currentMember, 
             <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '6px', color: theme.textSecondary }}>
               Project
             </label>
-            <select
+            <ProjectDropdown
               value={formData.project_id}
-              onChange={(e) => setFormData({ ...formData, project_id: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '6px 10px',
-                background: theme.background,
-                border: `0.5px solid ${theme.border}`,
-                borderRadius: '4px',
-                color: theme.text,
-                fontSize: '12px',
-                outline: 'none'
-              }}
-            >
-              <option value="">None</option>
-              {projects.map(project => (
-                <option key={project.id} value={project.id}>{project.name}</option>
-              ))}
-            </select>
+              onChange={(value) => setFormData({ ...formData, project_id: value })}
+              projects={projects}
+              theme={theme}
+              onNewProject={() => setShowNewProjectModal(true)}
+            />
           </div>
 
           <div style={{ marginBottom: '16px' }}>
@@ -1650,28 +2033,210 @@ function TaskDetailModal({ task, theme, members, projects, tags, currentMember, 
             <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '6px', color: theme.textSecondary }}>
               Tags
             </label>
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-              {tags.map(tag => {
-                const isActive = task.tags?.some(t => t.id === tag.id);
-                return (
+
+            {/* First row: Applied tags */}
+            <div style={{
+              display: 'flex',
+              gap: '4px',
+              flexWrap: 'wrap',
+              minHeight: '28px',
+              marginBottom: '6px'
+            }}>
+              {localTaskTags.length > 0 ? (
+                localTaskTags.map(tag => (
                   <button
                     key={tag.id}
                     onClick={() => handleToggleTag(tag.id)}
                     style={{
                       padding: '4px 8px',
-                      background: isActive ? tag.color + '30' : theme.background,
-                      border: `0.5px solid ${isActive ? tag.color : theme.border}`,
+                      background: tag.color + '30',
+                      border: `0.5px solid ${tag.color}`,
                       borderRadius: '4px',
-                      color: isActive ? tag.color : theme.text,
+                      color: tag.color,
                       fontSize: '11px',
-                      cursor: 'pointer'
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      transform: 'scale(1)',
+                      fontWeight: '500'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'scale(1.05)';
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.1)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'scale(1)';
+                      e.currentTarget.style.boxShadow = 'none';
                     }}
                   >
                     {tag.name}
                   </button>
-                );
-              })}
+                ))
+              ) : (
+                <div style={{
+                  fontSize: '11px',
+                  color: theme.textSecondary,
+                  fontStyle: 'italic',
+                  padding: '4px 0'
+                }}>
+                  No tags applied
+                </div>
+              )}
             </div>
+
+            {/* Second row: Unapplied tags + New tag button */}
+            <div style={{
+              display: 'flex',
+              gap: '4px',
+              flexWrap: 'wrap',
+              minHeight: '28px'
+            }}>
+              {tags.filter(tag => !localTaskTags.some(t => t.id === tag.id)).map(tag => (
+                <button
+                  key={tag.id}
+                  onClick={() => handleToggleTag(tag.id)}
+                  style={{
+                    padding: '4px 8px',
+                    background: theme.background,
+                    border: `0.5px solid ${theme.border}`,
+                    borderRadius: '4px',
+                    color: theme.textSecondary,
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    transform: 'scale(1)'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = theme.surfaceHover;
+                    e.currentTarget.style.color = theme.text;
+                    e.currentTarget.style.transform = 'scale(1.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = theme.background;
+                    e.currentTarget.style.color = theme.textSecondary;
+                    e.currentTarget.style.transform = 'scale(1)';
+                  }}
+                >
+                  {tag.name}
+                </button>
+              ))}
+
+              {/* New tag button */}
+              {!showNewTag && (
+                <button
+                  onClick={() => setShowNewTag(true)}
+                  style={{
+                    padding: '4px 8px',
+                    background: theme.background,
+                    border: `0.5px dashed ${theme.border}`,
+                    borderRadius: '4px',
+                    color: theme.textSecondary,
+                    fontSize: '11px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = theme.primary;
+                    e.currentTarget.style.borderColor = theme.primary;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = theme.textSecondary;
+                    e.currentTarget.style.borderColor = theme.border;
+                  }}
+                >
+                  + New tag
+                </button>
+              )}
+            </div>
+
+            {/* Create tag form */}
+            {showNewTag && (
+              <div style={{
+                marginTop: '8px',
+                padding: '12px',
+                background: theme.background,
+                border: `0.5px solid ${theme.border}`,
+                borderRadius: '4px'
+              }}>
+                <div style={{ marginBottom: '8px' }}>
+                  <input
+                    type="text"
+                    placeholder="Tag name"
+                    value={newTagForm.name}
+                    onChange={(e) => setNewTagForm({ ...newTagForm, name: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '6px 10px',
+                      background: theme.card || theme.surface,
+                      border: `0.5px solid ${theme.border}`,
+                      borderRadius: '4px',
+                      color: theme.text,
+                      fontSize: '12px',
+                      outline: 'none',
+                      marginBottom: '8px'
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                    {['#a259ff', '#f0b95a', '#e74c3c', '#2ecc71', '#5dade2', '#7c6bf0', '#e84393', '#f39c12'].map(color => (
+                      <button
+                        key={color}
+                        onClick={() => setNewTagForm({ ...newTagForm, color })}
+                        style={{
+                          width: '24px',
+                          height: '24px',
+                          borderRadius: '50%',
+                          background: color,
+                          border: newTagForm.color === color ? '2px solid white' : `0.5px solid ${theme.border}`,
+                          outline: newTagForm.color === color ? `2px solid ${color}` : 'none',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s'
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+                {tagError && (
+                  <div style={{ color: '#ef4444', fontSize: '11px', marginBottom: '8px' }}>
+                    {tagError}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    onClick={handleCreateTag}
+                    disabled={savingTag}
+                    style={{
+                      padding: '6px 12px',
+                      background: theme.primary,
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      cursor: savingTag ? 'not-allowed' : 'pointer',
+                      opacity: savingTag ? 0.7 : 1
+                    }}
+                  >
+                    {savingTag ? 'Creating...' : 'Create tag'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowNewTag(false);
+                      setNewTagForm({ name: '', color: '#a259ff' });
+                      setTagError('');
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'transparent',
+                      color: theme.textSecondary,
+                      border: `0.5px solid ${theme.border}`,
+                      borderRadius: '4px',
+                      fontSize: '12px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {error && (
@@ -1708,6 +2273,155 @@ function TaskDetailModal({ task, theme, members, projects, tags, currentMember, 
           </button>
         </div>
       </div>
+
+      {/* New Project Modal */}
+      {showNewProjectModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1001
+        }}
+        onClick={() => setShowNewProjectModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: theme.surface,
+              borderRadius: '8px',
+              padding: '24px',
+              width: '400px',
+              maxHeight: '80vh',
+              overflowY: 'auto'
+            }}
+          >
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '20px'
+            }}>
+              <h3 style={{ fontSize: '16px', fontWeight: '600', margin: 0 }}>New Project</h3>
+              <button
+                onClick={() => setShowNewProjectModal(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: theme.textSecondary,
+                  padding: '4px'
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '6px' }}>
+                Project name *
+              </label>
+              <input
+                type="text"
+                value={newProjectForm.name}
+                onChange={(e) => setNewProjectForm({ ...newProjectForm, name: e.target.value })}
+                placeholder="e.g. Website Redesign"
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: theme.background,
+                  border: `0.5px solid ${theme.border}`,
+                  borderRadius: '4px',
+                  color: theme.text,
+                  fontSize: '13px',
+                  outline: 'none'
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '6px' }}>
+                Color
+              </label>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {['#7c6bf0', '#a259ff', '#f0b95a', '#e74c3c', '#2ecc71', '#5dade2', '#e84393', '#f39c12'].map(color => (
+                  <button
+                    key={color}
+                    onClick={() => setNewProjectForm({ ...newProjectForm, color })}
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: color,
+                      border: newProjectForm.color === color ? '2px solid white' : `0.5px solid ${theme.border}`,
+                      outline: newProjectForm.color === color ? `2px solid ${color}` : 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s'
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {projectError && (
+              <div style={{
+                padding: '12px',
+                background: '#7f1d1d',
+                border: '0.5px solid #991b1b',
+                borderRadius: '4px',
+                color: '#fecaca',
+                fontSize: '13px',
+                marginBottom: '16px'
+              }}>
+                {projectError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => {
+                  setShowNewProjectModal(false);
+                  setNewProjectForm({ name: '', color: '#7c6bf0' });
+                  setProjectError('');
+                }}
+                style={{
+                  padding: '8px 16px',
+                  background: 'transparent',
+                  border: `0.5px solid ${theme.border}`,
+                  borderRadius: '4px',
+                  color: theme.text,
+                  fontSize: '13px',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateProject}
+                disabled={savingProject}
+                style={{
+                  padding: '8px 16px',
+                  background: theme.primary,
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: 'white',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  cursor: savingProject ? 'not-allowed' : 'pointer',
+                  opacity: savingProject ? 0.7 : 1
+                }}
+              >
+                {savingProject ? 'Creating...' : 'Create project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -6,10 +6,16 @@ const { createClient } = require('@supabase/supabase-js');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Initialize Supabase client
+// Initialize Supabase clients
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_ANON_KEY
+);
+
+// Admin client with service_role key (bypasses RLS)
+const supabaseAdmin = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 // Middleware
@@ -47,9 +53,11 @@ function logError(endpoint, error) {
 // List all members
 app.get('/api/members', async (req, res) => {
   try {
-    const { data, error } = await supabase
+    // Only return registered members (with user_id)
+    const { data, error } = await supabaseAdmin
       .from('px_members')
       .select('*')
+      .not('user_id', 'is', null)
       .order('name');
 
     if (error) throw error;
@@ -60,6 +68,71 @@ app.get('/api/members', async (req, res) => {
   }
 });
 
+// Create new member (used during signup, bypasses RLS)
+app.post('/api/members/create', async (req, res) => {
+  try {
+    const { auth_id, name, email } = req.body;
+
+    if (!auth_id || !name || !email) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    console.log('[DEBUG] Creating member with auth_id:', auth_id, 'email:', email);
+
+    // Check if member already exists
+    const { data: existing } = await supabaseAdmin
+      .from('px_members')
+      .select('*')
+      .or(`user_id.eq.${auth_id},email.eq.${email.toLowerCase()}`)
+      .maybeSingle();
+
+    if (existing) {
+      console.log('[DEBUG] Member already exists, linking if needed');
+      // Link auth_id if missing
+      if (!existing.user_id) {
+        const { data: updated } = await supabaseAdmin
+          .from('px_members')
+          .update({ user_id: auth_id })
+          .eq('id', existing.id)
+          .select()
+          .single();
+        return res.json(updated);
+      }
+      return res.json(existing);
+    }
+
+    // Pick avatar color
+    const colors = ['#7c6bf0', '#d4b3f5', '#5DCAA5', '#f0997b', '#e84393', '#3498db', '#f39c12', '#2ecc71'];
+    const { data: existingMembers } = await supabaseAdmin
+      .from('px_members')
+      .select('avatar_color');
+
+    const used = (existingMembers || []).map(m => m.avatar_color);
+    const color = colors.find(c => !used.includes(c)) || colors[Math.floor(Math.random() * colors.length)];
+
+    // Create new member using admin client (bypasses RLS)
+    const { data: newMember, error } = await supabaseAdmin
+      .from('px_members')
+      .insert({
+        user_id: auth_id,
+        name: name.trim(),
+        email: email.toLowerCase(),
+        avatar_color: color,
+        role: 'member'
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    console.log('[DEBUG] Created new member:', newMember);
+    res.json(newMember);
+  } catch (err) {
+    console.error('[ERROR] Create member error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Identify member by user_id or email
 app.post('/api/members/identify', async (req, res) => {
   try {
@@ -67,26 +140,31 @@ app.post('/api/members/identify', async (req, res) => {
     const user_id = auth_id; // Support both names
     console.log('[DEBUG] Identifying member with user_id:', user_id, 'email:', email);
 
+    // Check for valid inputs
+    if (!user_id || user_id === 'undefined' || !email) {
+      return res.status(400).json({ error: 'Missing required parameters: auth_id and email' });
+    }
+
     // 1. Try to find member by user_id first
-    let { data: member, error: authError } = await supabase
+    let { data: member, error: authError } = await supabaseAdmin
       .from('px_members')
       .select('*')
       .eq('user_id', user_id)
-      .single();
+      .maybeSingle();
 
     // 2. If not found, try by email
     if (!member && email) {
       console.log('[DEBUG] Not found by user_id, trying email...');
-      const { data: emailMember, error: emailError } = await supabase
+      const { data: emailMember, error: emailError } = await supabaseAdmin
         .from('px_members')
         .select('*')
         .eq('email', email.toLowerCase())
-        .single();
+        .maybeSingle();
 
       // 3. If found by email but no user_id, link them
       if (emailMember) {
         console.log('[DEBUG] Found by email, linking user_id...');
-        const { data: updated, error: updateError } = await supabase
+        const { data: updated, error: updateError } = await supabaseAdmin
           .from('px_members')
           .update({ user_id })
           .eq('id', emailMember.id)
@@ -103,7 +181,7 @@ app.post('/api/members/identify', async (req, res) => {
       console.log('[DEBUG] Member not found, creating new...');
       const avatarColors = ['#7c6bf0', '#d4b3f5', '#5DCAA5', '#f0997b', '#e84393', '#3498db', '#f39c12', '#2ecc71'];
 
-      const { data: existing } = await supabase
+      const { data: existing } = await supabaseAdmin
         .from('px_members')
         .select('avatar_color');
 
@@ -112,7 +190,7 @@ app.post('/api/members/identify', async (req, res) => {
 
       const memberName = name || email.split('@')[0];
 
-      const { data: newMember, error: createError } = await supabase
+      const { data: newMember, error: createError } = await supabaseAdmin
         .from('px_members')
         .insert({
           user_id,
@@ -142,7 +220,7 @@ app.patch('/api/members/:id/vibe', async (req, res) => {
     const { id } = req.params;
     const updates = nullifyEmptyStrings(req.body);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_members')
       .update(updates)
       .eq('id', id)
@@ -163,7 +241,9 @@ app.put('/api/members/:id', async (req, res) => {
     const { id } = req.params;
     const updates = nullifyEmptyStrings(req.body);
 
-    const { data, error } = await supabase
+    console.log('[DEBUG] PUT /api/members/:id', { id, updates });
+
+    const { data, error } = await supabaseAdmin
       .from('px_members')
       .update(updates)
       .eq('id', id)
@@ -171,6 +251,8 @@ app.put('/api/members/:id', async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    console.log('[DEBUG] Updated member:', data);
     res.json(data);
   } catch (error) {
     logError('PUT /api/members/:id', error);
@@ -184,24 +266,35 @@ app.put('/api/members/:id', async (req, res) => {
 app.get('/api/projects', async (req, res) => {
   try {
     const { member_id } = req.query;
+    console.log('[DEBUG] GET /api/projects - member_id:', member_id);
 
-    let projectsQuery = supabase
+    let projectsQuery = supabaseAdmin
       .from('px_projects')
       .select('*')
       .order('name');
 
     // Filter by member if specified
     if (member_id) {
-      const { data: memberProjects } = await supabase
+      const { data: memberProjects } = await supabaseAdmin
         .from('px_project_members')
         .select('project_id')
         .eq('member_id', member_id);
 
+      console.log('[DEBUG] GET /api/projects - memberProjects:', memberProjects);
       const projectIds = memberProjects?.map(pm => pm.project_id) || [];
-      projectsQuery = projectsQuery.in('id', projectIds);
+      console.log('[DEBUG] GET /api/projects - projectIds:', projectIds);
+
+      if (projectIds.length > 0) {
+        projectsQuery = projectsQuery.in('id', projectIds);
+      } else {
+        // No projects for this member
+        console.log('[DEBUG] GET /api/projects - No projects found for member');
+        return res.json([]);
+      }
     }
 
     const { data: projects, error: projectsError } = await projectsQuery;
+    console.log('[DEBUG] GET /api/projects - projects count:', projects?.length || 0);
 
     if (projectsError) throw projectsError;
 
@@ -339,17 +432,16 @@ app.get('/api/projects/stats', async (req, res) => {
 // Create project
 app.post('/api/projects', async (req, res) => {
   try {
-    const { name, color, description, budget_hours, member_ids } = req.body;
+    const { name, color, description, member_ids } = req.body;
 
     const projectData = nullifyEmptyStrings({
       name,
       color,
       description,
-      budget_hours,
       status: 'active'
     });
 
-    const { data: project, error: projectError } = await supabase
+    const { data: project, error: projectError } = await supabaseAdmin
       .from('px_projects')
       .insert([projectData])
       .select()
@@ -364,7 +456,7 @@ app.post('/api/projects', async (req, res) => {
         member_id
       }));
 
-      const { error: membersError } = await supabase
+      const { error: membersError } = await supabaseAdmin
         .from('px_project_members')
         .insert(memberInserts);
 
@@ -391,16 +483,15 @@ app.post('/api/projects', async (req, res) => {
 app.put('/api/projects/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, color, description, budget_hours, member_ids } = req.body;
+    const { name, color, description, member_ids } = req.body;
 
     const updates = nullifyEmptyStrings({
       name,
       color,
-      description,
-      budget_hours
+      description
     });
 
-    const { data: project, error: projectError } = await supabase
+    const { data: project, error: projectError } = await supabaseAdmin
       .from('px_projects')
       .update(updates)
       .eq('id', id)
@@ -412,7 +503,7 @@ app.put('/api/projects/:id', async (req, res) => {
     // Update project members if provided
     if (member_ids) {
       // Delete existing members
-      await supabase
+      await supabaseAdmin
         .from('px_project_members')
         .delete()
         .eq('project_id', id);
@@ -424,7 +515,7 @@ app.put('/api/projects/:id', async (req, res) => {
           member_id
         }));
 
-        await supabase
+        await supabaseAdmin
           .from('px_project_members')
           .insert(memberInserts);
       }
@@ -442,7 +533,7 @@ app.delete('/api/projects/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_projects')
       .update({ status: 'archived' })
       .eq('id', id)
@@ -463,7 +554,7 @@ app.patch('/api/projects/:id', async (req, res) => {
     const { id } = req.params;
     const updates = nullifyEmptyStrings(req.body);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_projects')
       .update(updates)
       .eq('id', id)
@@ -543,7 +634,7 @@ app.post('/api/tasks', async (req, res) => {
   try {
     const taskData = nullifyEmptyStrings(req.body);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_tasks')
       .insert([taskData])
       .select()
@@ -563,7 +654,7 @@ app.patch('/api/tasks/:id', async (req, res) => {
     const { id } = req.params;
     const updates = nullifyEmptyStrings(req.body);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_tasks')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', id)
@@ -583,7 +674,7 @@ app.delete('/api/tasks/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('px_tasks')
       .delete()
       .eq('id', id);
@@ -602,7 +693,7 @@ app.patch('/api/tasks/:id/move', async (req, res) => {
     const { id } = req.params;
     const { status, position } = req.body;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_tasks')
       .update({
         status,
@@ -654,7 +745,7 @@ app.post('/api/tasks/:taskId/comments', async (req, res) => {
       task_id: taskId
     });
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_task_comments')
       .insert([commentData])
       .select(`
@@ -701,7 +792,7 @@ app.post('/api/tasks/:taskId/docs', async (req, res) => {
       task_id: taskId
     });
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_docs')
       .insert([docData])
       .select()
@@ -720,7 +811,7 @@ app.delete('/api/docs/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('px_docs')
       .delete()
       .eq('id', id);
@@ -738,12 +829,14 @@ app.delete('/api/docs/:id', async (req, res) => {
 // List all tags
 app.get('/api/tags', async (req, res) => {
   try {
+    console.log('[DEBUG] GET /api/tags - Reading tags');
     const { data, error } = await supabase
       .from('px_tags')
       .select('*')
       .order('name');
 
     if (error) throw error;
+    console.log('[DEBUG] GET /api/tags - Found', data?.length || 0, 'tags');
     res.json(data);
   } catch (error) {
     logError('GET /api/tags', error);
@@ -755,14 +848,16 @@ app.get('/api/tags', async (req, res) => {
 app.post('/api/tags', async (req, res) => {
   try {
     const tagData = nullifyEmptyStrings(req.body);
+    console.log('[DEBUG] POST /api/tags - Creating tag:', tagData);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_tags')
       .insert([tagData])
       .select()
       .single();
 
     if (error) throw error;
+    console.log('[DEBUG] POST /api/tags - Created tag:', data);
     res.json(data);
   } catch (error) {
     logError('POST /api/tags', error);
@@ -774,14 +869,16 @@ app.post('/api/tags', async (req, res) => {
 app.post('/api/tasks/:taskId/tags/:tagId', async (req, res) => {
   try {
     const { taskId, tagId } = req.params;
+    console.log('[DEBUG] POST /api/tasks/:taskId/tags/:tagId - Adding tag', tagId, 'to task', taskId);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_task_tags')
       .insert([{ task_id: taskId, tag_id: tagId }])
       .select()
       .single();
 
     if (error) throw error;
+    console.log('[DEBUG] POST /api/tasks/:taskId/tags/:tagId - Added tag to task:', data);
     res.json(data);
   } catch (error) {
     logError('POST /api/tasks/:taskId/tags/:tagId', error);
@@ -793,14 +890,16 @@ app.post('/api/tasks/:taskId/tags/:tagId', async (req, res) => {
 app.delete('/api/tasks/:taskId/tags/:tagId', async (req, res) => {
   try {
     const { taskId, tagId } = req.params;
+    console.log('[DEBUG] DELETE /api/tasks/:taskId/tags/:tagId - Removing tag', tagId, 'from task', taskId);
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('px_task_tags')
       .delete()
       .eq('task_id', taskId)
       .eq('tag_id', tagId);
 
     if (error) throw error;
+    console.log('[DEBUG] DELETE /api/tasks/:taskId/tags/:tagId - Removed tag from task');
     res.json({ success: true });
   } catch (error) {
     logError('DELETE /api/tasks/:taskId/tags/:tagId', error);
@@ -899,7 +998,7 @@ app.post('/api/standup/today', async (req, res) => {
     });
 
     // Upsert standup
-    const { data: standup, error: standupError } = await supabase
+    const { data: standup, error: standupError } = await supabaseAdmin
       .from('px_standups')
       .upsert([standupData], {
         onConflict: 'member_id,date',
@@ -911,7 +1010,7 @@ app.post('/api/standup/today', async (req, res) => {
     if (standupError) throw standupError;
 
     // Update member vibe and vibe_date
-    const { error: memberError } = await supabase
+    const { error: memberError } = await supabaseAdmin
       .from('px_members')
       .update({ vibe, vibe_date: new Date().toISOString() })
       .eq('id', member_id);
@@ -986,7 +1085,7 @@ app.post('/api/standups', async (req, res) => {
   try {
     const standupData = nullifyEmptyStrings(req.body);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_standups')
       .upsert([standupData], {
         onConflict: 'member_id,date',
@@ -1149,7 +1248,7 @@ app.post('/api/time', async (req, res) => {
   try {
     const timeData = nullifyEmptyStrings(req.body);
 
-    const { data: entry, error: entryError } = await supabase
+    const { data: entry, error: entryError } = await supabaseAdmin
       .from('px_time_entries')
       .insert([timeData])
       .select()
@@ -1187,7 +1286,7 @@ app.delete('/api/time/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('px_time_entries')
       .delete()
       .eq('id', id);
@@ -1196,6 +1295,36 @@ app.delete('/api/time/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     logError('DELETE /api/time/:id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get heatmap data (past 12 weeks)
+app.get('/api/time/heatmap', async (req, res) => {
+  try {
+    const { member_id } = req.query;
+    const twelveWeeksAgo = new Date();
+    twelveWeeksAgo.setDate(twelveWeeksAgo.getDate() - 84);
+    const fromDate = twelveWeeksAgo.toISOString().split('T')[0];
+
+    const { data, error } = await supabaseAdmin
+      .from('px_time_entries')
+      .select('date, hours')
+      .eq('member_id', member_id)
+      .gte('date', fromDate);
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Group by date and sum hours
+    const grouped = {};
+    data.forEach(entry => {
+      grouped[entry.date] = (grouped[entry.date] || 0) + Number(entry.hours);
+    });
+
+    const result = Object.entries(grouped).map(([date, hours]) => ({ date, hours }));
+    res.json(result);
+  } catch (error) {
+    logError('GET /api/time/heatmap', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1235,7 +1364,7 @@ app.post('/api/time-entries', async (req, res) => {
   try {
     const timeData = nullifyEmptyStrings(req.body);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('px_time_entries')
       .insert([timeData])
       .select(`
@@ -1257,7 +1386,7 @@ app.delete('/api/time-entries/:id', async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from('px_time_entries')
       .delete()
       .eq('id', id);
