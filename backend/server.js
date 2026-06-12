@@ -24,8 +24,8 @@ app.use(cors({
     'http://localhost:5173',
     'http://localhost:5177',
     'http://localhost:5190',
-    'https://frontend-two-xi-84.vercel.app',
-    'https://frontend-aog9yyk7t-bsepid-4399s-projects.vercel.app'
+    'https://pixel-app-phi.vercel.app',
+    'https://pixel-qgpq9aons-bsepid-4399s-projects.vercel.app'
   ],
   credentials: true
 }));
