@@ -19,7 +19,16 @@ const supabaseAdmin = createClient(
 );
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://localhost:5177',
+    'http://localhost:5190',
+    'https://frontend-two-xi-84.vercel.app',
+    'https://frontend-aog9yyk7t-bsepid-4399s-projects.vercel.app'
+  ],
+  credentials: true
+}));
 app.use(express.json());
 
 // Helper function to convert empty strings to null
