@@ -51,6 +51,7 @@ export default function App() {
   const [activeView, setActiveView] = useState('board');
   const [sidebarFilter, setSidebarFilter] = useState(null);
   const [theme, setTheme] = useState('dark');
+  const leaveTimerRef = useRef(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -283,24 +284,13 @@ export default function App() {
   // Close vibe picker on outside click
   useEffect(() => {
     if (!vibePickerOpen) return;
-
-    let handler;
-    // Add delay to prevent the same click that opened it from closing it
-    const timeout = setTimeout(() => {
-      handler = (e) => {
-        if (!e.target.closest('.vibe-strip-container')) {
-          setVibePickerOpen(false);
-        }
-      };
-      document.addEventListener('click', handler);
-    }, 100);
-
-    return () => {
-      clearTimeout(timeout);
-      if (handler) {
-        document.removeEventListener('click', handler);
+    const handler = (e) => {
+      if (!e.target.closest('.vibe-strip-container')) {
+        setTimeout(() => setVibePickerOpen(false), 150);
       }
     };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
   }, [vibePickerOpen]);
 
   if (!session) {
@@ -327,17 +317,26 @@ export default function App() {
     const emojis = ['😩', '😔', '😐', '😊', '🔥'];
     const emoji = emojis[(vibe || 3) - 1];
 
+    const handleMouseEnter = () => {
+      if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+      setShowEmoji(true);
+      if (member.id !== currentMember?.id) {
+        onHover && onHover(member);
+      }
+    };
+
+    const handleMouseLeave = () => {
+      setShowEmoji(false);
+      leaveTimerRef.current = setTimeout(() => {
+        onLeave && onLeave();
+      }, 300);
+    };
+
     return (
       <div
         onClick={onClick}
-        onMouseEnter={() => {
-          setShowEmoji(true);
-          onHover && onHover(member);
-        }}
-        onMouseLeave={() => {
-          setShowEmoji(false);
-          onLeave && onLeave();
-        }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         style={{
           width: size,
           height: size,
@@ -521,29 +520,28 @@ export default function App() {
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
                   {['😩', '😔', '😐', '😊', '🔥'].map((emoji, i) => (
                     <div key={i} onClick={async (e) => {
+                      e.preventDefault();
                       e.stopPropagation();
                       const newVibe = i + 1;
-                      // update state immediately for instant feedback
+                      console.log('Setting vibe to:', newVibe);
+
+                      // Update state immediately
                       setVibes(prev => ({ ...prev, [currentMember.id]: newVibe }));
                       setVibePickerOpen(false);
-                      // save to backend
+
+                      // Save to backend
                       try {
-                        await fetch(`${import.meta.env.VITE_API_URL || ''}/api/standup/today`, {
+                        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/standup/today`, {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
                             member_id: currentMember.id,
-                            vibe: newVibe,
-                            blockers: '',
-                            note: ''
+                            vibe: newVibe
                           })
                         });
-                        // refetch vibes to confirm
-                        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/standups/vibes`);
                         const data = await res.json();
-                        const vibeMap = {};
-                        data.forEach(d => { if (d.member_id && d.vibe) vibeMap[d.member_id] = d.vibe; });
-                        setVibes(vibeMap);
+                        console.log('Vibe saved:', data);
+                        if (!res.ok) console.error('Vibe save failed:', data);
                       } catch (err) {
                         console.error('Vibe save error:', err);
                       }
@@ -569,19 +567,21 @@ export default function App() {
 
             {/* TEAMMATE popup — shows on hover of another member's avatar */}
             {hoveredMember && (
-              <div style={{
-                position: 'absolute',
-                top: 38,
-                right: 0,
-                zIndex: 100,
-                background: currentTheme.surface,
-                border: `.5px solid ${currentTheme.border}`,
-                borderRadius: 10,
-                padding: 14,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-                minWidth: 200,
-                pointerEvents: 'none'
-              }}>
+              <div
+                onMouseEnter={() => { if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current); }}
+                onMouseLeave={() => setHoveredMember(null)}
+                style={{
+                  position: 'absolute',
+                  top: 38,
+                  right: 0,
+                  zIndex: 100,
+                  background: currentTheme.surface,
+                  border: `.5px solid ${currentTheme.border}`,
+                  borderRadius: 10,
+                  padding: 14,
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                  minWidth: 200
+                }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                   <div style={{
                     width: 32,
@@ -594,7 +594,7 @@ export default function App() {
                     fontSize: 13,
                     fontWeight: 600,
                     color: '#fff'
-                  }}>{hoveredMember.name[0]}</div>
+                  }}>{hoveredMember.name[0].toUpperCase()}</div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 500, color: currentTheme.text }}>{hoveredMember.name}</div>
                     <div style={{ fontSize: 16 }}>
@@ -605,21 +605,28 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-                {/* Their current tasks */}
                 <div style={{ fontSize: 10, color: currentTheme.textTertiary, textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 5 }}>
                   Working on
                 </div>
                 {(memberTasks[hoveredMember.id] || [])
                   .filter(t => t.status === 'in_progress')
-                  .slice(0, 2)
+                  .slice(0, 3)
                   .map(t => (
-                    <div key={t.id} style={{ fontSize: 11, color: currentTheme.textSecondary, padding: '2px 0' }}>
-                      · {t.title}
+                    <div key={t.id} style={{
+                      fontSize: 11,
+                      color: currentTheme.textSecondary,
+                      padding: '3px 0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}>
+                      <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#7c6bf0', flexShrink: 0, display: 'inline-block' }}></span>
+                      {t.title}
                     </div>
                   ))
                 }
                 {!(memberTasks[hoveredMember.id] || []).filter(t => t.status === 'in_progress').length && (
-                  <div style={{ fontSize: 11, color: currentTheme.textTertiary }}>Nothing in progress</div>
+                  <div style={{ fontSize: 11, color: currentTheme.textTertiary, fontStyle: 'italic' }}>Nothing in progress</div>
                 )}
               </div>
             )}

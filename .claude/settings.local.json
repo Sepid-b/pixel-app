@@ -35,7 +35,13 @@
       "Bash(then rm nul)",
       "Bash(fi)",
       "Bash(git remote add:*)",
-      "Bash(git branch:*)"
+      "Bash(git branch:*)",
+      "Bash(git pull:*)",
+      "Bash(git checkout:*)",
+      "Bash(railway:*)",
+      "Bash(vercel --version:*)",
+      "Bash(vercel login:*)",
+      "Bash(vercel:*)"
     ]
   }
 }

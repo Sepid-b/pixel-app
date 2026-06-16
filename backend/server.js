@@ -956,17 +956,16 @@ app.delete('/api/tasks/:taskId/tags/:tagId', async (req, res) => {
 app.get('/api/standups/vibes', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
-
     const { data, error } = await supabaseAdmin
       .from('px_standups')
       .select('member_id, vibe')
       .eq('date', today);
-
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) throw error;
+    console.log('Vibes today:', data);
     res.json(data || []);
-  } catch (error) {
-    logError('GET /api/standups/vibes', error);
-    res.status(500).json({ error: error.message });
+  } catch(err) {
+    console.error('Vibes error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -974,85 +973,75 @@ app.get('/api/standups/vibes', async (req, res) => {
 app.get('/api/standup/today', async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
-
-    // Get all members
-    const { data: members, error: membersError } = await supabase
-      .from('px_members')
-      .select('*')
-      .order('name');
-
-    if (membersError) throw membersError;
+    const { data: members } = await supabaseAdmin.from('px_members').select('*');
 
     const result = await Promise.all(members.map(async (member) => {
-      // Get standup for today
-      const { data: standup } = await supabase
+      const { data: standup } = await supabaseAdmin
         .from('px_standups')
         .select('*')
         .eq('member_id', member.id)
         .eq('date', today)
         .single();
 
-      // Get tasks in progress
-      const { data: working_on } = await supabase
+      const { data: workingOn } = await supabaseAdmin
         .from('px_tasks')
-        .select('id, title, status')
-        .eq('status', 'in-progress')
-        .eq('assignee_id', member.id);
-
-      // Get tasks completed today
-      const todayDate = new Date(today);
-      const todayStart = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate()).toISOString();
-      const todayEnd = new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate(), 23, 59, 59).toISOString();
-
-      const { data: completed_today } = await supabase
-        .from('px_tasks')
-        .select('id, title, status, completed_at')
-        .eq('status', 'done')
+        .select('id, title, project_id')
         .eq('assignee_id', member.id)
+        .eq('status', 'in_progress');
+
+      const todayStart = `${today}T00:00:00.000Z`;
+      const todayEnd = `${today}T23:59:59.999Z`;
+      const { data: completedToday } = await supabaseAdmin
+        .from('px_tasks')
+        .select('id, title, project_id')
+        .eq('assignee_id', member.id)
+        .eq('status', 'done')
         .gte('completed_at', todayStart)
         .lte('completed_at', todayEnd);
 
       return {
-        member,
+        member: { ...member, avatar_letter: member.name[0].toUpperCase() },
         standup: standup || null,
-        working_on: working_on || [],
-        completed_today: completed_today || []
+        working_on: workingOn || [],
+        completed_today: completedToday || []
       };
     }));
 
     res.json(result);
-  } catch (error) {
-    logError('GET /api/standup/today', error);
-    res.status(500).json({ error: error.message });
+  } catch(err) {
+    console.error('Standup today error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
 // Upsert today's standup
 app.post('/api/standup/today', async (req, res) => {
   try {
-    const { member_id, vibe, blockers, note } = req.body;
-    const today = new Date().toISOString().split('T')[0];
+    const { member_id, vibe, blockers, today: todayNote, yesterday } = req.body;
+    const date = new Date().toISOString().split('T')[0];
+
+    const upsertData = {
+      member_id,
+      date,
+      updated_at: new Date().toISOString()
+    };
+
+    if (vibe !== undefined) upsertData.vibe = vibe;
+    if (blockers !== undefined) upsertData.blockers = blockers;
+    if (todayNote !== undefined) upsertData.today = todayNote;
+    if (yesterday !== undefined) upsertData.yesterday = yesterday;
 
     const { data, error } = await supabaseAdmin
       .from('px_standups')
-      .upsert({
-        member_id,
-        date: today,
-        vibe: vibe || 3,
-        blockers: blockers || '',
-        note: note || ''
-      }, { onConflict: 'member_id,date' })
+      .upsert(upsertData, { onConflict: 'member_id,date' })
       .select()
       .single();
 
-    if (error) {
-      console.error('Standup upsert error:', error);
-      return res.status(500).json({ error: error.message });
-    }
+    if (error) throw error;
     res.json(data);
-  } catch (error) {
-    logError('POST /api/standup/today', error);
-    res.status(500).json({ error: error.message });
+  } catch(err) {
+    console.error('Standup save error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
