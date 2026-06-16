@@ -62,10 +62,31 @@ function logError(endpoint, error) {
 // List all members
 app.get('/api/members', async (req, res) => {
   try {
-    // Only return registered members (with user_id)
+    const { workspace_id } = req.query;
+
+    if (!workspace_id) {
+      return res.status(400).json({ error: 'workspace_id is required' });
+    }
+
+    // Get members who belong to the workspace
+    const { data: workspaceMembers, error: wmError } = await supabaseAdmin
+      .from('px_workspace_members')
+      .select('member_id')
+      .eq('workspace_id', workspace_id);
+
+    if (wmError) throw wmError;
+
+    const memberIds = workspaceMembers?.map(wm => wm.member_id) || [];
+
+    if (memberIds.length === 0) {
+      return res.json([]);
+    }
+
+    // Get full member details
     const { data, error } = await supabaseAdmin
       .from('px_members')
       .select('*')
+      .in('id', memberIds)
       .not('user_id', 'is', null)
       .order('name');
 
@@ -274,12 +295,17 @@ app.put('/api/members/:id', async (req, res) => {
 // List all projects with detailed stats
 app.get('/api/projects', async (req, res) => {
   try {
-    const { member_id } = req.query;
-    console.log('[DEBUG] GET /api/projects - member_id:', member_id);
+    const { member_id, workspace_id } = req.query;
+    console.log('[DEBUG] GET /api/projects - member_id:', member_id, 'workspace_id:', workspace_id);
+
+    if (!workspace_id) {
+      return res.status(400).json({ error: 'workspace_id is required' });
+    }
 
     let projectsQuery = supabaseAdmin
       .from('px_projects')
       .select('*')
+      .eq('workspace_id', workspace_id)
       .order('name');
 
     // Filter by member if specified
@@ -583,6 +609,12 @@ app.patch('/api/projects/:id', async (req, res) => {
 // List tasks with filters
 app.get('/api/tasks', async (req, res) => {
   try {
+    const { workspace_id } = req.query;
+
+    if (!workspace_id) {
+      return res.status(400).json({ error: 'workspace_id is required' });
+    }
+
     let query = supabase
       .from('px_tasks')
       .select(`
@@ -591,6 +623,7 @@ app.get('/api/tasks', async (req, res) => {
         assignee:px_members!assignee_id(id, name, avatar_color),
         tags:px_task_tags(tag:px_tags(*))
       `)
+      .eq('workspace_id', workspace_id)
       .order('position');
 
     // Apply filters from query params
@@ -882,10 +915,17 @@ app.delete('/api/docs/:id', async (req, res) => {
 // List all tags
 app.get('/api/tags', async (req, res) => {
   try {
-    console.log('[DEBUG] GET /api/tags - Reading tags');
+    const { workspace_id } = req.query;
+
+    if (!workspace_id) {
+      return res.status(400).json({ error: 'workspace_id is required' });
+    }
+
+    console.log('[DEBUG] GET /api/tags - Reading tags for workspace:', workspace_id);
     const { data, error } = await supabase
       .from('px_tags')
       .select('*')
+      .eq('workspace_id', workspace_id)
       .order('name');
 
     if (error) throw error;
@@ -1046,11 +1086,18 @@ app.delete('/api/tasks/:id/collaborators/:member_id', async (req, res) => {
 // Get today's vibe summary
 app.get('/api/standups/vibes', async (req, res) => {
   try {
+    const { workspace_id } = req.query;
+
+    if (!workspace_id) {
+      return res.status(400).json({ error: 'workspace_id is required' });
+    }
+
     const today = new Date().toISOString().split('T')[0];
     const { data, error } = await supabaseAdmin
       .from('px_standups')
       .select('member_id, vibe')
-      .eq('date', today);
+      .eq('date', today)
+      .eq('workspace_id', workspace_id);
     if (error) throw error;
     console.log('Vibes today:', data);
     res.json(data || []);
@@ -1063,8 +1110,30 @@ app.get('/api/standups/vibes', async (req, res) => {
 // Get today's standup data for all members
 app.get('/api/standup/today', async (req, res) => {
   try {
+    const { workspace_id } = req.query;
+
+    if (!workspace_id) {
+      return res.status(400).json({ error: 'workspace_id is required' });
+    }
+
     const today = new Date().toISOString().split('T')[0];
-    const { data: members } = await supabaseAdmin.from('px_members').select('*');
+
+    // Get members in this workspace
+    const { data: workspaceMembers } = await supabaseAdmin
+      .from('px_workspace_members')
+      .select('member_id')
+      .eq('workspace_id', workspace_id);
+
+    const memberIds = workspaceMembers?.map(wm => wm.member_id) || [];
+
+    if (memberIds.length === 0) {
+      return res.json([]);
+    }
+
+    const { data: members } = await supabaseAdmin
+      .from('px_members')
+      .select('*')
+      .in('id', memberIds);
 
     const result = await Promise.all(members.map(async (member) => {
       const { data: standup } = await supabaseAdmin
@@ -1072,13 +1141,15 @@ app.get('/api/standup/today', async (req, res) => {
         .select('*')
         .eq('member_id', member.id)
         .eq('date', today)
+        .eq('workspace_id', workspace_id)
         .single();
 
       const { data: workingOn } = await supabaseAdmin
         .from('px_tasks')
         .select('id, title, project_id')
         .eq('assignee_id', member.id)
-        .eq('status', 'in_progress');
+        .eq('status', 'in_progress')
+        .eq('workspace_id', workspace_id);
 
       const todayStart = `${today}T00:00:00.000Z`;
       const todayEnd = `${today}T23:59:59.999Z`;
@@ -1087,6 +1158,7 @@ app.get('/api/standup/today', async (req, res) => {
         .select('id, title, project_id')
         .eq('assignee_id', member.id)
         .eq('status', 'done')
+        .eq('workspace_id', workspace_id)
         .gte('completed_at', todayStart)
         .lte('completed_at', todayEnd);
 
@@ -1108,11 +1180,12 @@ app.get('/api/standup/today', async (req, res) => {
 // Upsert today's standup
 app.post('/api/standup/today', async (req, res) => {
   try {
-    const { member_id, vibe, blockers, today: todayText, yesterday } = req.body;
+    const { member_id, vibe, blockers, today: todayText, yesterday, workspace_id } = req.body;
     if (!member_id) return res.status(400).json({ error: 'member_id required' });
 
     const date = new Date().toISOString().split('T')[0];
     const upsertData = { member_id, date, updated_at: new Date().toISOString() };
+    if (workspace_id) upsertData.workspace_id = workspace_id;
     if (vibe !== undefined) upsertData.vibe = parseInt(vibe);
     if (blockers !== undefined) upsertData.blockers = blockers;
     if (todayText !== undefined) upsertData.today = todayText;
@@ -1147,8 +1220,12 @@ const getWeekMonday = (dateStr) => {
 // Get standup history
 app.get('/api/standup/history', async (req, res) => {
   try {
-    const { period = 'daily' } = req.query;
-    console.log('History endpoint called, period:', period);
+    const { period = 'daily', workspace_id } = req.query;
+    console.log('History endpoint called, period:', period, 'workspace_id:', workspace_id);
+
+    if (!workspace_id) {
+      return res.status(400).json({ error: 'workspace_id is required' });
+    }
 
     // Get ALL standups with member info
     const { data: standups, error } = await supabaseAdmin
@@ -1157,6 +1234,7 @@ app.get('/api/standup/history', async (req, res) => {
         id, member_id, date, blockers, today, yesterday, vibe,
         px_members (id, name, avatar_color)
       `)
+      .eq('workspace_id', workspace_id)
       .order('date', { ascending: false })
       .limit(100);
 
@@ -1219,7 +1297,11 @@ app.post('/api/standups', async (req, res) => {
 // Get time entries for a week
 app.get('/api/time', async (req, res) => {
   try {
-    const { member_id, week_start } = req.query;
+    const { member_id, week_start, workspace_id } = req.query;
+
+    if (!workspace_id) {
+      return res.status(400).json({ error: 'workspace_id is required' });
+    }
 
     // Calculate week end (Sunday)
     const weekStartDate = new Date(week_start);
@@ -1229,10 +1311,22 @@ app.get('/api/time', async (req, res) => {
     const weekStartStr = week_start;
     const weekEndStr = weekEndDate.toISOString().split('T')[0];
 
-    // Get all members
+    // Get members in this workspace
+    const { data: workspaceMembers } = await supabaseAdmin
+      .from('px_workspace_members')
+      .select('member_id')
+      .eq('workspace_id', workspace_id);
+
+    const memberIds = workspaceMembers?.map(wm => wm.member_id) || [];
+
+    if (memberIds.length === 0) {
+      return res.json({ time_data: [], project_breakdown: [] });
+    }
+
     const { data: members } = await supabase
       .from('px_members')
       .select('*')
+      .in('id', memberIds)
       .order('name');
 
     // Get time entries for the week
@@ -1243,6 +1337,7 @@ app.get('/api/time', async (req, res) => {
         task:px_tasks(id, title),
         project:px_projects(id, name, color)
       `)
+      .eq('workspace_id', workspace_id)
       .gte('date', weekStartStr)
       .lte('date', weekEndStr)
       .order('date', { ascending: false });
@@ -1507,6 +1602,306 @@ app.delete('/api/time-entries/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     logError('DELETE /api/time-entries/:id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==================== WORKSPACES ENDPOINTS ====================
+
+// Get all workspaces for a member
+app.get('/api/workspaces/member/:member_id', async (req, res) => {
+  try {
+    const { member_id } = req.params;
+
+    const { data: memberships, error } = await supabaseAdmin
+      .from('px_workspace_members')
+      .select(`
+        role,
+        workspace:px_workspaces(id, name, invite_code, created_at)
+      `)
+      .eq('member_id', member_id);
+
+    if (error) throw error;
+
+    // Get member count for each workspace
+    const result = await Promise.all(memberships.map(async (m) => {
+      const { count } = await supabaseAdmin
+        .from('px_workspace_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('workspace_id', m.workspace.id);
+
+      return {
+        workspace: m.workspace,
+        role: m.role,
+        member_count: count || 0
+      };
+    }));
+
+    res.json(result);
+  } catch (error) {
+    logError('GET /api/workspaces/member/:member_id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Create workspace
+app.post('/api/workspaces', async (req, res) => {
+  try {
+    const { name, member_id } = req.body;
+    if (!name || !member_id) return res.status(400).json({ error: 'name and member_id required' });
+
+    // Generate invite code from name
+    const words = name.split(' ').filter(w => w.length > 0);
+    const initials = words.map(w => w[0].toUpperCase()).join('');
+    const random = Math.floor(1000 + Math.random() * 9000);
+    const invite_code = initials + random;
+
+    // Create workspace
+    const { data: workspace, error: wsError } = await supabaseAdmin
+      .from('px_workspaces')
+      .insert({ name, invite_code, created_by: member_id })
+      .select()
+      .single();
+
+    if (wsError) throw wsError;
+
+    // Add creator as admin
+    const { error: memberError } = await supabaseAdmin
+      .from('px_workspace_members')
+      .insert({ workspace_id: workspace.id, member_id, role: 'admin' });
+
+    if (memberError) throw memberError;
+
+    res.json({ workspace, invite_code });
+  } catch (error) {
+    logError('POST /api/workspaces', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get workspace by invite code
+app.get('/api/workspaces/by-code/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+
+    const { data: workspace, error } = await supabaseAdmin
+      .from('px_workspaces')
+      .select('id, name, invite_code')
+      .eq('invite_code', code)
+      .single();
+
+    if (error || !workspace) return res.status(404).json({ error: 'Workspace not found' });
+
+    // Get member count
+    const { count } = await supabaseAdmin
+      .from('px_workspace_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspace.id);
+
+    res.json({ ...workspace, member_count: count || 0 });
+  } catch (error) {
+    logError('GET /api/workspaces/by-code/:code', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Request to join workspace
+app.post('/api/workspaces/:id/request', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { member_id } = req.body;
+    if (!member_id) return res.status(400).json({ error: 'member_id required' });
+
+    // Check if already a member
+    const { data: existing } = await supabaseAdmin
+      .from('px_workspace_members')
+      .select('id')
+      .eq('workspace_id', id)
+      .eq('member_id', member_id)
+      .single();
+
+    if (existing) return res.status(400).json({ error: 'Already a member' });
+
+    // Check for pending request
+    const { data: pendingReq } = await supabaseAdmin
+      .from('px_join_requests')
+      .select('id, status')
+      .eq('workspace_id', id)
+      .eq('member_id', member_id)
+      .single();
+
+    if (pendingReq && pendingReq.status === 'pending') {
+      return res.status(400).json({ error: 'Request already pending' });
+    }
+
+    // Create join request
+    const { data, error } = await supabaseAdmin
+      .from('px_join_requests')
+      .insert({ workspace_id: id, member_id, status: 'pending' })
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ status: 'pending' });
+  } catch (error) {
+    logError('POST /api/workspaces/:id/request', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get pending join requests
+app.get('/api/workspaces/:id/requests', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from('px_join_requests')
+      .select(`
+        id, status, requested_at,
+        member:px_members(id, name, email, avatar_color)
+      `)
+      .eq('workspace_id', id)
+      .eq('status', 'pending')
+      .order('requested_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(data || []);
+  } catch (error) {
+    logError('GET /api/workspaces/:id/requests', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Approve join request
+app.post('/api/workspaces/:id/requests/:request_id/approve', async (req, res) => {
+  try {
+    const { id, request_id } = req.params;
+    const { reviewed_by } = req.body;
+
+    // Get request
+    const { data: request, error: reqError } = await supabaseAdmin
+      .from('px_join_requests')
+      .select('member_id')
+      .eq('id', request_id)
+      .single();
+
+    if (reqError) throw reqError;
+
+    // Update request
+    const { error: updateError } = await supabaseAdmin
+      .from('px_join_requests')
+      .update({
+        status: 'approved',
+        reviewed_at: new Date().toISOString(),
+        reviewed_by
+      })
+      .eq('id', request_id);
+
+    if (updateError) throw updateError;
+
+    // Add to workspace
+    const { error: memberError } = await supabaseAdmin
+      .from('px_workspace_members')
+      .insert({ workspace_id: id, member_id: request.member_id, role: 'member' });
+
+    if (memberError) throw memberError;
+
+    res.json({ status: 'approved' });
+  } catch (error) {
+    logError('POST /api/workspaces/:id/requests/:request_id/approve', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reject join request
+app.post('/api/workspaces/:id/requests/:request_id/reject', async (req, res) => {
+  try {
+    const { request_id } = req.params;
+    const { reviewed_by } = req.body;
+
+    const { error } = await supabaseAdmin
+      .from('px_join_requests')
+      .update({
+        status: 'rejected',
+        reviewed_at: new Date().toISOString(),
+        reviewed_by
+      })
+      .eq('id', request_id);
+
+    if (error) throw error;
+    res.json({ status: 'rejected' });
+  } catch (error) {
+    logError('POST /api/workspaces/:id/requests/:request_id/reject', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get request status for member
+app.get('/api/workspaces/:id/request-status/:member_id', async (req, res) => {
+  try {
+    const { id, member_id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from('px_join_requests')
+      .select('status')
+      .eq('workspace_id', id)
+      .eq('member_id', member_id)
+      .order('requested_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error || !data) return res.json({ status: 'none' });
+    res.json({ status: data.status });
+  } catch (error) {
+    logError('GET /api/workspaces/:id/request-status/:member_id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Remove member from workspace
+app.delete('/api/workspaces/:id/members/:member_id', async (req, res) => {
+  try {
+    const { id, member_id } = req.params;
+
+    const { error } = await supabaseAdmin
+      .from('px_workspace_members')
+      .delete()
+      .eq('workspace_id', id)
+      .eq('member_id', member_id);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    logError('DELETE /api/workspaces/:id/members/:member_id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update workspace
+app.put('/api/workspaces/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, regenerate_invite_code } = req.body;
+
+    const updates = {};
+    if (name) updates.name = name;
+
+    if (regenerate_invite_code) {
+      const random = Math.floor(100000 + Math.random() * 900000);
+      updates.invite_code = 'INV' + random;
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from('px_workspaces')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    logError('PUT /api/workspaces/:id', error);
     res.status(500).json({ error: error.message });
   }
 });

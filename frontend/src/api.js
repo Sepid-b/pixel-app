@@ -24,7 +24,7 @@ async function apiCall(endpoint, options = {}) {
 
 export const api = {
   // Members
-  getMembers: () => apiCall('/api/members'),
+  getMembers: (workspace_id) => apiCall(`/api/members?workspace_id=${workspace_id}`),
   identifyMember: (authId, email, name) => apiCall('/api/members/identify', {
     method: 'POST',
     body: JSON.stringify({ auth_id: authId, email, name })
@@ -35,7 +35,7 @@ export const api = {
   }),
 
   // Projects
-  getProjects: () => apiCall('/api/projects'),
+  getProjects: (workspace_id) => apiCall(`/api/projects?workspace_id=${workspace_id}`),
   createProject: (project) => apiCall('/api/projects', {
     method: 'POST',
     body: JSON.stringify(project)
@@ -46,8 +46,8 @@ export const api = {
   }),
 
   // Tasks
-  getTasks: (filters = {}) => {
-    const params = new URLSearchParams(filters);
+  getTasks: (workspace_id, filters = {}) => {
+    const params = new URLSearchParams({ workspace_id, ...filters });
     const query = params.toString() ? `?${params.toString()}` : '';
     return apiCall(`/api/tasks${query}`);
   },
@@ -85,7 +85,7 @@ export const api = {
   }),
 
   // Tags
-  getTags: () => apiCall('/api/tags'),
+  getTags: (workspace_id) => apiCall(`/api/tags?workspace_id=${workspace_id}`),
   createTag: (tag) => apiCall('/api/tags', {
     method: 'POST',
     body: JSON.stringify(tag)
@@ -98,7 +98,7 @@ export const api = {
   }),
 
   // Standups
-  getVibes: () => apiCall('/api/standups/vibes'),
+  getVibes: (workspace_id) => apiCall(`/api/standups/vibes?workspace_id=${workspace_id}`),
   upsertStandup: (standup) => apiCall('/api/standups', {
     method: 'POST',
     body: JSON.stringify(standup)

@@ -2,13 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from './supabaseClient';
 import { api } from './api';
 import Login from './Login';
+import WorkspaceFlow from './WorkspaceFlow';
 import BoardView from './views/BoardView';
 import ListView from './views/ListView';
 import StandupView from './views/StandupView';
 import ProjectsView from './views/ProjectsView';
 import TimeView from './views/TimeView';
 import MembersView from './views/MembersView';
-import { Sun, Moon, ChevronLeft, ChevronRight, Home, User, Calendar, Clock, Folder, FileText, Activity, Logout, Users } from 'tabler-icons-react';
+import { Sun, Moon, ChevronLeft, ChevronRight, Home, User, Calendar, Clock, Folder, FileText, Activity, Logout, Users, Briefcase, ChevronDown } from 'tabler-icons-react';
 
 const themes = {
   dark: {
@@ -64,6 +65,13 @@ export default function App() {
   });
   const profileDropdownRef = useRef(null);
 
+  // Workspace state
+  const [currentWorkspace, setCurrentWorkspace] = useState(null);
+  const [myWorkspaces, setMyWorkspaces] = useState([]);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [showWorkspaceFlow, setShowWorkspaceFlow] = useState(false);
+  const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
+
   const currentTheme = themes[theme];
 
   useEffect(() => {
@@ -81,6 +89,12 @@ export default function App() {
   useEffect(() => {
     if (session?.user?.id && session?.user?.email) {
       identifyMember(session.user.id, session.user.email, session.user.user_metadata?.full_name);
+    }
+  }, [session]);
+
+  // Load data when workspace is selected
+  useEffect(() => {
+    if (currentWorkspace) {
       loadMembers().then(() => {
         fetchMemberTasks();
       });
@@ -92,7 +106,7 @@ export default function App() {
       const cleanup = setupRealtimeSubscription();
       return cleanup;
     }
-  }, [session]);
+  }, [currentWorkspace]);
 
   useEffect(() => {
     if (currentMember) {
@@ -106,14 +120,42 @@ export default function App() {
       const member = await api.identifyMember(authId, email, name);
       console.log('[DEBUG] App.jsx - identifyMember() received member:', member);
       setCurrentMember(member);
+
+      // Fetch user's workspaces
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/workspaces/member/${member.id}`);
+      const workspaces = await res.json();
+      setMyWorkspaces(workspaces);
+
+      if (workspaces.length === 0) {
+        // No workspaces → show WorkspaceFlow
+        setShowWorkspaceFlow(true);
+      } else if (workspaces.length === 1) {
+        // One workspace → enter directly
+        setCurrentWorkspace(workspaces[0].workspace);
+      } else {
+        // Multiple workspaces → show picker
+        setShowWorkspacePicker(true);
+      }
     } catch (error) {
       console.error('Failed to identify member:', error);
     }
   };
 
+  const handleWorkspaceComplete = (workspace) => {
+    setCurrentWorkspace(workspace);
+    setShowWorkspaceFlow(false);
+    // Refresh workspaces list
+    if (currentMember) {
+      fetch(`${import.meta.env.VITE_API_URL || ''}/api/workspaces/member/${currentMember.id}`)
+        .then(res => res.json())
+        .then(workspaces => setMyWorkspaces(workspaces));
+    }
+  };
+
   const loadMembers = async () => {
+    if (!currentWorkspace) return;
     try {
-      const data = await api.getMembers();
+      const data = await api.getMembers(currentWorkspace.id);
       setMembers(data);
     } catch (error) {
       console.error('Failed to load members:', error);
@@ -121,9 +163,10 @@ export default function App() {
   };
 
   const loadProjects = async () => {
+    if (!currentWorkspace) return;
     try {
       console.log('[DEBUG] App.jsx - loadProjects() called');
-      const data = await api.getProjects();
+      const data = await api.getProjects(currentWorkspace.id);
       console.log('[DEBUG] App.jsx - loadProjects() received data:', data);
       setProjects(data);
     } catch (error) {
@@ -132,8 +175,9 @@ export default function App() {
   };
 
   const loadTasks = async () => {
+    if (!currentWorkspace) return;
     try {
-      const data = await api.getTasks();
+      const data = await api.getTasks(currentWorkspace.id);
       setTasks(data);
     } catch (error) {
       console.error('Failed to load tasks:', error);
@@ -141,8 +185,9 @@ export default function App() {
   };
 
   const loadVibes = async () => {
+    if (!currentWorkspace) return;
     try {
-      const data = await api.getVibes();
+      const data = await api.getVibes(currentWorkspace.id);
       const vibeMap = {};
       data.forEach(d => {
         if (d.member_id && d.vibe) vibeMap[d.member_id] = d.vibe;
@@ -154,9 +199,9 @@ export default function App() {
   };
 
   const loadMyVibe = async () => {
-    if (!currentMember) return;
+    if (!currentMember || !currentWorkspace) return;
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/standup/today`);
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/standup/today?workspace_id=${currentWorkspace.id}`);
       const data = await response.json();
       const myStandup = data.find(d => d.member?.id === currentMember.id);
       if (myStandup?.standup?.vibe) {
@@ -168,11 +213,11 @@ export default function App() {
   };
 
   const fetchMemberTasks = async () => {
-    if (!members || members.length === 0) return;
+    if (!members || members.length === 0 || !currentWorkspace) return;
     try {
       const taskMap = {};
       await Promise.all(members.map(async (m) => {
-        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/tasks?member_id=${m.id}`);
+        const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/tasks?member_id=${m.id}&workspace_id=${currentWorkspace.id}`);
         const data = await res.json();
         taskMap[m.id] = Array.isArray(data) ? data : [];
       }));
@@ -183,6 +228,7 @@ export default function App() {
   };
 
   const selectVibe = async (vibe) => {
+    if (!currentWorkspace) return;
     setMyVibe(vibe);
     setVibePickerOpen(false);
     try {
@@ -193,7 +239,8 @@ export default function App() {
           member_id: currentMember.id,
           vibe,
           blockers: '',
-          note: ''
+          note: '',
+          workspace_id: currentWorkspace.id
         })
       });
       await loadVibes();
@@ -293,6 +340,18 @@ export default function App() {
     return () => document.removeEventListener('mousedown', handler);
   }, [vibePickerOpen]);
 
+  // Close workspace switcher on outside click
+  useEffect(() => {
+    if (!switcherOpen) return;
+    const handler = (e) => {
+      if (!e.target.closest('.workspace-switcher-container')) {
+        setSwitcherOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [switcherOpen]);
+
   if (!session) {
     return <Login onLogin={setSession} />;
   }
@@ -308,6 +367,78 @@ export default function App() {
         color: currentTheme.text
       }}>
         Loading...
+      </div>
+    );
+  }
+
+  // Show workspace flow if user has no workspaces
+  if (showWorkspaceFlow) {
+    return <WorkspaceFlow currentMember={currentMember} onComplete={handleWorkspaceComplete} />;
+  }
+
+  // Show workspace picker if user has multiple workspaces
+  if (showWorkspacePicker) {
+    return (
+      <div style={{ minHeight: '100vh', background: currentTheme.background, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <div style={{ width: 60, height: 60, background: currentTheme.primary, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 24 }}>
+          <div style={{ width: 12, height: 12, background: 'white', borderRadius: '50%' }} />
+        </div>
+        <h1 style={{ fontSize: 24, fontWeight: 600, color: currentTheme.text, marginBottom: 8 }}>
+          Choose a workspace
+        </h1>
+        <p style={{ fontSize: 14, color: currentTheme.textTertiary, marginBottom: 40 }}>
+          Select which workspace to enter
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 400, width: '100%' }}>
+          {myWorkspaces.map((ws) => (
+            <div
+              key={ws.workspace.id}
+              onClick={() => {
+                setCurrentWorkspace(ws.workspace);
+                setShowWorkspacePicker(false);
+              }}
+              style={{
+                background: currentTheme.surface,
+                border: `.5px solid ${currentTheme.border}`,
+                borderRadius: 12,
+                padding: 20,
+                cursor: 'pointer',
+                transition: 'transform 0.2s, border-color 0.2s'
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.borderColor = currentTheme.primary;
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.borderColor = currentTheme.border;
+              }}
+            >
+              <h3 style={{ fontSize: 16, fontWeight: 600, color: currentTheme.text, marginBottom: 4 }}>
+                {ws.workspace.name}
+              </h3>
+              <p style={{ fontSize: 13, color: currentTheme.textTertiary }}>
+                {ws.role === 'admin' ? 'Admin' : 'Member'}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading if no workspace selected yet
+  if (!currentWorkspace) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: currentTheme.background,
+        color: currentTheme.text
+      }}>
+        Loading workspace...
       </div>
     );
   }
@@ -536,7 +667,8 @@ export default function App() {
                           headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({
                             member_id: currentMember.id,
-                            vibe: newVibe
+                            vibe: newVibe,
+                            workspace_id: currentWorkspace?.id
                           })
                         });
                         const data = await res.json();
@@ -891,6 +1023,93 @@ export default function App() {
           <div style={{ padding: '12px 8px' }}>
             {!sidebarCollapsed && (
               <>
+                {/* Workspace switcher */}
+                <div className="workspace-switcher-container" style={{ position: 'relative', marginBottom: 12 }}>
+                  <div
+                    onClick={() => setSwitcherOpen(!switcherOpen)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 12px',
+                      background: currentTheme.surfaceHover,
+                      border: `.5px solid ${currentTheme.border}`,
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      transition: 'border-color 0.15s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = currentTheme.primary}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = currentTheme.border}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                      <Briefcase size={16} style={{ flexShrink: 0, color: currentTheme.textSecondary }} />
+                      <span style={{
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: currentTheme.text,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        {currentWorkspace.name}
+                      </span>
+                    </div>
+                    <ChevronDown size={14} style={{ flexShrink: 0, color: currentTheme.textSecondary }} />
+                  </div>
+
+                  {/* Workspace switcher dropdown */}
+                  {switcherOpen && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 'calc(100% + 4px)',
+                        left: 0,
+                        right: 0,
+                        zIndex: 50,
+                        background: currentTheme.card,
+                        border: `.5px solid ${currentTheme.border}`,
+                        borderRadius: 8,
+                        boxShadow: '0 4px 20px rgba(0,0,0,0.25)',
+                        maxHeight: 300,
+                        overflowY: 'auto'
+                      }}
+                    >
+                      {myWorkspaces.map((ws) => (
+                        <div
+                          key={ws.workspace.id}
+                          onClick={() => {
+                            setCurrentWorkspace(ws.workspace);
+                            setSwitcherOpen(false);
+                          }}
+                          style={{
+                            padding: '10px 12px',
+                            cursor: 'pointer',
+                            background: ws.workspace.id === currentWorkspace.id ? currentTheme.surfaceHover : 'transparent',
+                            borderLeft: ws.workspace.id === currentWorkspace.id ? `3px solid ${currentTheme.primary}` : '3px solid transparent'
+                          }}
+                          onMouseEnter={e => {
+                            if (ws.workspace.id !== currentWorkspace.id) {
+                              e.currentTarget.style.background = currentTheme.surfaceHover;
+                            }
+                          }}
+                          onMouseLeave={e => {
+                            if (ws.workspace.id !== currentWorkspace.id) {
+                              e.currentTarget.style.background = 'transparent';
+                            }
+                          }}
+                        >
+                          <div style={{ fontSize: 13, fontWeight: 500, color: currentTheme.text, marginBottom: 2 }}>
+                            {ws.workspace.name}
+                          </div>
+                          <div style={{ fontSize: 11, color: currentTheme.textTertiary }}>
+                            {ws.role === 'admin' ? 'Admin' : 'Member'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <SidebarItem
                   icon={<Home size={18} />}
                   label="Home"
@@ -1002,6 +1221,7 @@ export default function App() {
               sidebarFilter={sidebarFilter}
               setSidebarFilter={setSidebarFilter}
               onTasksChange={loadTasks}
+              currentWorkspace={currentWorkspace}
             />
           )}
           {activeView === 'list' && (
@@ -1047,6 +1267,8 @@ export default function App() {
               currentMember={currentMember}
               members={members}
               setMembers={setMembers}
+              currentWorkspace={currentWorkspace}
+              myWorkspace={myWorkspaces.find(w => w.workspace.id === currentWorkspace?.id)}
             />
           )}
           {activeView === 'docs' && (

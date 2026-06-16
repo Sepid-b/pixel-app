@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../api';
 import { supabase } from '../supabaseClient';
-import { Plus, X, Search, CalendarEvent, Clock, MessageCircle, File, Tag, ChevronDown, Link, Upload, FileText, Download } from 'tabler-icons-react';
+import { Plus, X, Search, CalendarEvent, Clock, MessageCircle, File, Tag, ChevronDown, Link, Upload, FileText, Download, Copy, Check } from 'tabler-icons-react';
 
 const statuses = ['todo', 'in-progress', 'in-review', 'blocked', 'done'];
 const statusLabels = {
@@ -12,20 +12,24 @@ const statusLabels = {
   'done': 'Done'
 };
 
-export default function BoardView({ tasks, members, projects, setProjects, currentMember, theme, filters, setFilters, sidebarFilter, setSidebarFilter, onTasksChange }) {
+export default function BoardView({ tasks, members, projects, setProjects, currentMember, theme, filters, setFilters, sidebarFilter, setSidebarFilter, onTasksChange, currentWorkspace }) {
   const [showNewTaskModal, setShowNewTaskModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState(null);
   const [draggedTask, setDraggedTask] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
   const [tags, setTags] = useState([]);
+  const [copiedInvite, setCopiedInvite] = useState(false);
 
   useEffect(() => {
-    loadTags();
-  }, []);
+    if (currentWorkspace) {
+      loadTags();
+    }
+  }, [currentWorkspace]);
 
   const loadTags = async () => {
+    if (!currentWorkspace) return;
     try {
-      const data = await api.getTags();
+      const data = await api.getTags(currentWorkspace.id);
       setTags(data);
     } catch (error) {
       console.error('Failed to load tags:', error);
@@ -94,6 +98,14 @@ export default function BoardView({ tasks, members, projects, setProjects, curre
     }
 
     setDraggedTask(null);
+  };
+
+  const handleCopyInviteCode = () => {
+    if (currentWorkspace?.invite_code) {
+      navigator.clipboard.writeText(currentWorkspace.invite_code);
+      setCopiedInvite(true);
+      setTimeout(() => setCopiedInvite(false), 2000);
+    }
   };
 
   return (
@@ -223,7 +235,218 @@ export default function BoardView({ tasks, members, projects, setProjects, curre
         </div>
       )}
 
+      {/* Welcome Card - Show when no tasks exist */}
+      {filteredTasks.length === 0 && !sidebarFilter && !filters.member && !filters.project && !filters.priority && !filters.search && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '500px'
+        }}>
+          <div style={{
+            maxWidth: '500px',
+            background: theme.card,
+            border: `.5px solid ${theme.border}`,
+            borderRadius: '16px',
+            padding: '40px',
+            textAlign: 'center'
+          }}>
+            <div style={{
+              width: 80,
+              height: 80,
+              background: theme.primary,
+              borderRadius: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 24px',
+              fontSize: '40px'
+            }}>
+              🎯
+            </div>
+
+            <h2 style={{
+              fontSize: '24px',
+              fontWeight: '600',
+              color: theme.text,
+              marginBottom: '8px'
+            }}>
+              Welcome to {currentWorkspace?.name || 'your workspace'}!
+            </h2>
+
+            <p style={{
+              fontSize: '14px',
+              color: theme.textSecondary,
+              marginBottom: '32px'
+            }}>
+              Get started by creating your first task or inviting your team
+            </p>
+
+            {/* Getting Started Checklist */}
+            <div style={{
+              background: theme.surface,
+              border: `.5px solid ${theme.border}`,
+              borderRadius: '12px',
+              padding: '24px',
+              textAlign: 'left',
+              marginBottom: '24px'
+            }}>
+              <h3 style={{
+                fontSize: '14px',
+                fontWeight: '600',
+                color: theme.text,
+                marginBottom: '16px'
+              }}>
+                Getting started
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                  <div style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    background: 'rgba(124,107,240,0.15)',
+                    border: '2px solid #7c6bf0',
+                    flexShrink: 0,
+                    marginTop: '2px'
+                  }}></div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: '500', color: theme.text, marginBottom: '2px' }}>
+                      Create your first task
+                    </div>
+                    <div style={{ fontSize: '12px', color: theme.textSecondary }}>
+                      Click "New task" to add work items to track
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                  <div style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    background: 'rgba(124,107,240,0.15)',
+                    border: '2px solid #7c6bf0',
+                    flexShrink: 0,
+                    marginTop: '2px'
+                  }}></div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: '500', color: theme.text, marginBottom: '2px' }}>
+                      Invite your team
+                    </div>
+                    <div style={{ fontSize: '12px', color: theme.textSecondary }}>
+                      Share your invite code to collaborate
+                    </div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                  <div style={{
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    background: 'rgba(124,107,240,0.15)',
+                    border: '2px solid #7c6bf0',
+                    flexShrink: 0,
+                    marginTop: '2px'
+                  }}></div>
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: '500', color: theme.text, marginBottom: '2px' }}>
+                      Explore the features
+                    </div>
+                    <div style={{ fontSize: '12px', color: theme.textSecondary }}>
+                      Check out Projects, Standup, and Time tracking
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Invite Code Section */}
+            {currentWorkspace?.invite_code && (
+              <div style={{
+                background: theme.surface,
+                border: `.5px solid ${theme.border}`,
+                borderRadius: '12px',
+                padding: '20px',
+                marginBottom: '24px'
+              }}>
+                <div style={{
+                  fontSize: '12px',
+                  fontWeight: '600',
+                  color: theme.textSecondary,
+                  marginBottom: '8px',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
+                }}>
+                  Your workspace invite code
+                </div>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: theme.background,
+                  border: `.5px solid ${theme.border}`,
+                  borderRadius: '8px',
+                  padding: '12px 16px'
+                }}>
+                  <code style={{
+                    fontSize: '18px',
+                    fontWeight: '600',
+                    fontFamily: 'monospace',
+                    letterSpacing: '2px',
+                    color: theme.primary
+                  }}>
+                    {currentWorkspace.invite_code}
+                  </code>
+                  <button
+                    onClick={handleCopyInviteCode}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: copiedInvite ? '#22c55e' : theme.textSecondary,
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      transition: 'color 0.15s'
+                    }}
+                  >
+                    {copiedInvite ? <Check size={20} /> : <Copy size={20} />}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Create Task Button */}
+            <button
+              onClick={() => setShowNewTaskModal(true)}
+              style={{
+                width: '100%',
+                padding: '12px 16px',
+                background: theme.primary,
+                border: 'none',
+                borderRadius: '8px',
+                color: 'white',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                transition: 'background 0.15s'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = theme.primaryHover}
+              onMouseLeave={e => e.currentTarget.style.background = theme.primary}
+            >
+              <Plus size={18} />
+              Create your first task
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Board Columns */}
+      {(filteredTasks.length > 0 || sidebarFilter || filters.member || filters.project || filters.priority || filters.search) && (
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(5, 1fr)',
@@ -270,6 +493,7 @@ export default function BoardView({ tasks, members, projects, setProjects, curre
           </div>
         ))}
       </div>
+      )}
 
       {showNewTaskModal && (
         <NewTaskModal

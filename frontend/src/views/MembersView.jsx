@@ -1,15 +1,41 @@
 import React, { useState, useEffect } from 'react';
-import { Copy, Check } from 'tabler-icons-react';
+import { supabase } from '../supabaseClient';
+import { Copy, Check, UserPlus, X } from 'tabler-icons-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-export default function MembersView({ T, currentMember, members, setMembers }) {
+export default function MembersView({ T, currentMember, members, setMembers, currentWorkspace, myWorkspace }) {
   const [copied, setCopied] = useState(false);
   const [memberStats, setMemberStats] = useState({});
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const [processingRequest, setProcessingRequest] = useState(null);
 
   useEffect(() => {
     loadMemberStats();
   }, [members]);
+
+  useEffect(() => {
+    if (currentWorkspace && myWorkspace?.role === 'admin') {
+      loadPendingRequests();
+
+      // Subscribe to realtime updates for join requests
+      const channel = supabase
+        .channel('join-requests-changes')
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'px_join_requests',
+          filter: `workspace_id=eq.${currentWorkspace.id}`
+        }, () => {
+          loadPendingRequests();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+  }, [currentWorkspace, myWorkspace]);
 
   const loadMemberStats = async () => {
     try {
@@ -41,6 +67,52 @@ export default function MembersView({ T, currentMember, members, setMembers }) {
       setMemberStats(stats);
     } catch (error) {
       console.error('Failed to load member stats:', error);
+    }
+  };
+
+  const loadPendingRequests = async () => {
+    if (!currentWorkspace) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/workspaces/${currentWorkspace.id}/requests`);
+      const data = await res.json();
+      setPendingRequests(data);
+    } catch (error) {
+      console.error('Failed to load pending requests:', error);
+    }
+  };
+
+  const handleApprove = async (requestId) => {
+    if (!currentWorkspace) return;
+    setProcessingRequest(requestId);
+    try {
+      const res = await fetch(`${API_BASE}/api/workspaces/${currentWorkspace.id}/requests/${requestId}/approve`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        await loadPendingRequests();
+        // Optionally reload members list
+      }
+    } catch (error) {
+      console.error('Failed to approve request:', error);
+    } finally {
+      setProcessingRequest(null);
+    }
+  };
+
+  const handleReject = async (requestId) => {
+    if (!currentWorkspace) return;
+    setProcessingRequest(requestId);
+    try {
+      const res = await fetch(`${API_BASE}/api/workspaces/${currentWorkspace.id}/requests/${requestId}/reject`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        await loadPendingRequests();
+      }
+    } catch (error) {
+      console.error('Failed to reject request:', error);
+    } finally {
+      setProcessingRequest(null);
     }
   };
 
@@ -77,6 +149,96 @@ export default function MembersView({ T, currentMember, members, setMembers }) {
           </div>
         </div>
       </div>
+
+      {/* Pending Join Requests (Admin Only) */}
+      {myWorkspace?.role === 'admin' && pendingRequests.length > 0 && (
+        <div style={{ padding: '16px 20px', borderBottom: `0.5px solid ${T.border}` }}>
+          <div style={{
+            background: T.card,
+            border: `0.5px solid ${T.border}`,
+            borderRadius: '10px',
+            padding: '16px'
+          }}>
+            <div style={{
+              fontSize: '13px',
+              fontWeight: '500',
+              color: T.text,
+              marginBottom: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
+              <UserPlus size={16} />
+              Pending join requests ({pendingRequests.length})
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {pendingRequests.map((req) => (
+                <div
+                  key={req.id}
+                  style={{
+                    background: T.surfaceHover,
+                    border: `0.5px solid ${T.border}`,
+                    borderRadius: '8px',
+                    padding: '12px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '13px', fontWeight: '500', color: T.text }}>
+                      {req.member.name}
+                    </div>
+                    <div style={{ fontSize: '11px', color: T.textTertiary }}>
+                      {req.member.email}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => handleApprove(req.id)}
+                      disabled={processingRequest === req.id}
+                      style={{
+                        padding: '6px 12px',
+                        background: '#22c55e',
+                        border: 'none',
+                        borderRadius: '6px',
+                        color: 'white',
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        cursor: processingRequest === req.id ? 'not-allowed' : 'pointer',
+                        opacity: processingRequest === req.id ? 0.5 : 1
+                      }}
+                    >
+                      {processingRequest === req.id ? 'Approving...' : 'Approve'}
+                    </button>
+                    <button
+                      onClick={() => handleReject(req.id)}
+                      disabled={processingRequest === req.id}
+                      style={{
+                        padding: '6px 12px',
+                        background: T.surfaceHover,
+                        border: `0.5px solid ${T.border}`,
+                        borderRadius: '6px',
+                        color: '#ef4444',
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        cursor: processingRequest === req.id ? 'not-allowed' : 'pointer',
+                        opacity: processingRequest === req.id ? 0.5 : 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      <X size={12} />
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Members Grid */}
       <div style={{
