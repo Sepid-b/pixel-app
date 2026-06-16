@@ -34,7 +34,9 @@ export default function BoardView({ tasks, members, projects, setProjects, curre
 
   const filteredTasks = tasks.filter(task => {
     // Sidebar filters
-    if (sidebarFilter === 'my-tasks' && task.assignee_id !== currentMember.id) return false;
+    if (sidebarFilter === 'my-tasks' &&
+        task.assignee_id !== currentMember.id &&
+        !(task.collaborators || []).some(c => c.id === currentMember.id)) return false;
     if (sidebarFilter === 'due-this-week') {
       if (!task.due_date) return false;
       const today = new Date();
@@ -551,23 +553,32 @@ function TaskCard({ task, theme, onClick, onDragStart }) {
           )}
         </div>
 
-        {assignee && (
-          <div style={{
-            width: '18px',
-            height: '18px',
-            borderRadius: '50%',
-            background: assignee.avatar_color,
-            border: `0.5px solid ${theme.border}`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'white',
-            fontSize: '7px',
-            fontWeight: '600'
-          }}>
-            {assignee.name[0]}
-          </div>
-        )}
+        {/* Assignee + collaborators */}
+        <div style={{display:'flex', alignItems:'center', marginLeft:'auto'}}>
+          {/* Collaborators — small, overlapping */}
+          {(task.collaborators || []).slice(0,2).map((c, i) => (
+            <div key={c.id} style={{
+              width:16, height:16, borderRadius:'50%',
+              background: c.avatar_color,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:7, fontWeight:600, color:'#fff',
+              marginLeft: i === 0 ? 0 : -4,
+              border:`1.5px solid ${theme.surface}`,
+              zIndex: 2 - i
+            }}>{c.name[0].toUpperCase()}</div>
+          ))}
+          {/* Primary assignee — slightly larger */}
+          {assignee && (
+            <div style={{
+              width:18, height:18, borderRadius:'50%',
+              background: assignee.avatar_color, border:`.5px solid ${theme.border}`,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              fontSize:7, fontWeight:600, color:'#fff',
+              marginLeft: (task.collaborators||[]).length > 0 ? -4 : 0,
+              zIndex: 10
+            }}>{assignee.name[0].toUpperCase()}</div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1002,6 +1013,7 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
   });
   const [comments, setComments] = useState([]);
   const [docs, setDocs] = useState([]);
+  const [collaborators, setCollaborators] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [newDocUrl, setNewDocUrl] = useState('');
   const [newDocTitle, setNewDocTitle] = useState('');
@@ -1037,6 +1049,7 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
   useEffect(() => {
     loadComments();
     loadDocs();
+    loadCollaborators();
   }, [task.id]);
 
   // Sync localTaskTags when task.tags changes from parent
@@ -1059,6 +1072,41 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
       setDocs(data);
     } catch (error) {
       console.error('Failed to load docs:', error);
+    }
+  };
+
+  const loadCollaborators = async () => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/tasks/${task.id}/collaborators`);
+      const data = await res.json();
+      setCollaborators(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Failed to load collaborators:', error);
+    }
+  };
+
+  const addCollaborator = async (memberId) => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/tasks/${task.id}/collaborators`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ member_id: memberId })
+      });
+      const data = await res.json();
+      setCollaborators(prev => [...prev, data]);
+    } catch (error) {
+      console.error('Failed to add collaborator:', error);
+    }
+  };
+
+  const removeCollaborator = async (memberId) => {
+    try {
+      await fetch(`${import.meta.env.VITE_API_URL || ''}/api/tasks/${task.id}/collaborators/${memberId}`, {
+        method: 'DELETE'
+      });
+      setCollaborators(prev => prev.filter(c => c.id !== memberId));
+    } catch (error) {
+      console.error('Failed to remove collaborator:', error);
     }
   };
 
@@ -1983,6 +2031,57 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
               {members.map(member => (
                 <option key={member.id} value={member.id}>{member.name}</option>
               ))}
+            </select>
+          </div>
+
+          {/* Collaborators section */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '6px', color: theme.textSecondary }}>
+              Collaborators
+            </label>
+            {/* Existing collaborators */}
+            <div style={{display:'flex', flexWrap:'wrap', gap:4, marginBottom:6}}>
+              {collaborators.map(c => (
+                <div key={c.id} style={{
+                  display:'flex', alignItems:'center', gap:5,
+                  padding:'3px 8px', borderRadius:20,
+                  background:theme.background, border:`.5px solid ${theme.border}`,
+                  fontSize:11, color:theme.textSecondary
+                }}>
+                  <div style={{
+                    width:16, height:16, borderRadius:'50%',
+                    background:c.avatar_color,
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                    fontSize:7, fontWeight:600, color:'#fff'
+                  }}>{c.name[0].toUpperCase()}</div>
+                  {c.name}
+                  <span
+                    onClick={() => removeCollaborator(c.id)}
+                    style={{fontSize:10, color:theme.textTertiary, cursor:'pointer', marginLeft:2}}
+                  >✕</span>
+                </div>
+              ))}
+            </div>
+            {/* Add collaborator dropdown */}
+            <select
+              onChange={async (e) => {
+                if (!e.target.value) return;
+                await addCollaborator(e.target.value);
+                e.target.value = '';
+              }}
+              style={{
+                width:'100%', background:theme.background, border:`.5px solid ${theme.border}`,
+                borderRadius:4, padding:'6px 10px', fontSize:12,
+                color:theme.text, fontFamily:'inherit', cursor:'pointer', outline:'none'
+              }}
+            >
+              <option value="">+ Add collaborator</option>
+              {members
+                .filter(m => m.id !== formData.assignee_id && !collaborators.find(c => c.id === m.id))
+                .map(m => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))
+              }
             </select>
           </div>
 

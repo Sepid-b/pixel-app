@@ -6,7 +6,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
 export default function StandupView({ T, currentMember, members }) {
   const [activeTab, setActiveTab] = useState('today');
   const [todayData, setTodayData] = useState([]);
-  const [myDraft, setMyDraft] = useState({ blockers: '', note: '', vibe: 3 });
+  const [myDraft, setMyDraft] = useState({ blockers: '', today: '', vibe: 3 });
   const [mySavedStandup, setMySavedStandup] = useState(null);
   const [isEditing, setIsEditing] = useState(true);
   const [historyPeriod, setHistoryPeriod] = useState('daily');
@@ -44,7 +44,7 @@ export default function StandupView({ T, currentMember, members }) {
         setIsEditing(false);
         setMyDraft({
           blockers: myData.standup.blockers || '',
-          note: myData.standup.note || '',
+          today: myData.standup.today || '',
           vibe: myData.standup.vibe || 3
         });
       } else {
@@ -319,8 +319,8 @@ export default function StandupView({ T, currentMember, members }) {
                     <div style={{ fontSize: '9px', textTransform: 'uppercase', color: T.textTertiary, marginBottom: '4px' }}>
                       Note to team
                     </div>
-                    <div style={{ fontSize: '11px', color: mySavedStandup.note ? T.textSecondary : T.textTertiary, fontStyle: mySavedStandup.note ? 'normal' : 'italic' }}>
-                      {mySavedStandup.note || '—'}
+                    <div style={{ fontSize: '11px', color: mySavedStandup.today ? T.textSecondary : T.textTertiary, fontStyle: mySavedStandup.today ? 'normal' : 'italic' }}>
+                      {mySavedStandup.today || '—'}
                     </div>
                   </div>
                 </>
@@ -396,8 +396,8 @@ export default function StandupView({ T, currentMember, members }) {
                       Note to team
                     </div>
                     <textarea
-                      value={myDraft.note}
-                      onChange={(e) => setMyDraft({ ...myDraft, note: e.target.value })}
+                      value={myDraft.today}
+                      onChange={(e) => setMyDraft({ ...myDraft, today: e.target.value })}
                       placeholder="Anything the team should know?"
                       style={{
                         width: '100%',
@@ -531,9 +531,9 @@ export default function StandupView({ T, currentMember, members }) {
                           </div>
                         )}
 
-                        {data.standup.note && (
+                        {data.standup.today && (
                           <div style={{ fontSize: '10px', color: T.textTertiary, fontStyle: 'italic' }}>
-                            {data.standup.note}
+                            {data.standup.today}
                           </div>
                         )}
                       </>
@@ -662,9 +662,9 @@ export default function StandupView({ T, currentMember, members }) {
                                 ⚠ {entry.standup.blockers}
                               </div>
                             )}
-                            {entry.standup.note && (
+                            {entry.standup.today && (
                               <div style={{ fontSize: '9px', color: T.textTertiary, fontStyle: 'italic' }}>
-                                {entry.standup.note}
+                                {entry.standup.today}
                               </div>
                             )}
                           </div>

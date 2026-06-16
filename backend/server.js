@@ -623,11 +623,21 @@ app.get('/api/tasks', async (req, res) => {
         .select('*', { count: 'exact', head: true })
         .eq('task_id', task.id);
 
+      // Fetch collaborators
+      const { data: collabs } = await supabaseAdmin
+        .from('px_task_collaborators')
+        .select('member_id, px_members(id, name, avatar_color)')
+        .eq('task_id', task.id);
+
       return {
         ...task,
         tags: task.tags?.map(t => t.tag) || [],
         comment_count: commentCount || 0,
-        doc_count: docCount || 0
+        doc_count: docCount || 0,
+        collaborators: (collabs || []).map(c => ({
+          ...c.px_members,
+          avatar_letter: c.px_members.name[0].toUpperCase()
+        }))
       };
     }));
 
@@ -950,6 +960,87 @@ app.delete('/api/tasks/:taskId/tags/:tagId', async (req, res) => {
   }
 });
 
+// ==================== TASK COLLABORATORS ENDPOINTS ====================
+
+// Get collaborators for a task
+app.get('/api/tasks/:id/collaborators', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabaseAdmin
+      .from('px_task_collaborators')
+      .select(`
+        member_id,
+        px_members (id, name, avatar_color)
+      `)
+      .eq('task_id', id);
+
+    if (error) throw error;
+
+    const collaborators = (data || []).map(c => ({
+      ...c.px_members,
+      avatar_letter: c.px_members.name[0].toUpperCase()
+    }));
+
+    res.json(collaborators);
+  } catch (error) {
+    logError('GET /api/tasks/:id/collaborators', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Add collaborator to task
+app.post('/api/tasks/:id/collaborators', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { member_id } = req.body;
+
+    if (!member_id) return res.status(400).json({ error: 'member_id required' });
+
+    // Insert collaborator
+    const { error: insertError } = await supabaseAdmin
+      .from('px_task_collaborators')
+      .insert({ task_id: id, member_id });
+
+    if (insertError) throw insertError;
+
+    // Fetch member info
+    const { data: member, error: memberError } = await supabaseAdmin
+      .from('px_members')
+      .select('*')
+      .eq('id', member_id)
+      .single();
+
+    if (memberError) throw memberError;
+
+    res.json({
+      ...member,
+      avatar_letter: member.name[0].toUpperCase()
+    });
+  } catch (error) {
+    logError('POST /api/tasks/:id/collaborators', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Remove collaborator from task
+app.delete('/api/tasks/:id/collaborators/:member_id', async (req, res) => {
+  try {
+    const { id, member_id } = req.params;
+
+    const { error } = await supabaseAdmin
+      .from('px_task_collaborators')
+      .delete()
+      .eq('task_id', id)
+      .eq('member_id', member_id);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    logError('DELETE /api/tasks/:id/collaborators/:member_id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==================== STANDUPS ENDPOINTS ====================
 
 // Get today's vibe summary
@@ -1017,18 +1108,14 @@ app.get('/api/standup/today', async (req, res) => {
 // Upsert today's standup
 app.post('/api/standup/today', async (req, res) => {
   try {
-    const { member_id, vibe, blockers, today: todayNote, yesterday } = req.body;
+    const { member_id, vibe, blockers, today: todayText, yesterday } = req.body;
+    if (!member_id) return res.status(400).json({ error: 'member_id required' });
+
     const date = new Date().toISOString().split('T')[0];
-
-    const upsertData = {
-      member_id,
-      date,
-      updated_at: new Date().toISOString()
-    };
-
-    if (vibe !== undefined) upsertData.vibe = vibe;
+    const upsertData = { member_id, date, updated_at: new Date().toISOString() };
+    if (vibe !== undefined) upsertData.vibe = parseInt(vibe);
     if (blockers !== undefined) upsertData.blockers = blockers;
-    if (todayNote !== undefined) upsertData.today = todayNote;
+    if (todayText !== undefined) upsertData.today = todayText;
     if (yesterday !== undefined) upsertData.yesterday = yesterday;
 
     const { data, error } = await supabaseAdmin
@@ -1037,10 +1124,13 @@ app.post('/api/standup/today', async (req, res) => {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('Standup upsert error:', error);
+      return res.status(500).json({ error: error.message });
+    }
     res.json(data);
   } catch(err) {
-    console.error('Standup save error:', err);
+    console.error('Standup post error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1064,7 +1154,7 @@ app.get('/api/standup/history', async (req, res) => {
     const { data: standups, error } = await supabaseAdmin
       .from('px_standups')
       .select(`
-        id, member_id, date, blockers, note, vibe,
+        id, member_id, date, blockers, today, yesterday, vibe,
         px_members (id, name, avatar_color)
       `)
       .order('date', { ascending: false })
