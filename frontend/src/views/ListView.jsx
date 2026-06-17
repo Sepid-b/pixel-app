@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../api';
+import { X } from 'tabler-icons-react';
 
 const statuses = ['todo', 'in-progress', 'in-review', 'blocked', 'done'];
 const statusLabels = {
@@ -22,7 +23,10 @@ export default function ListView({ tasks, members, projects, currentMember, them
   const [selectedTask, setSelectedTask] = useState(null);
 
   const filteredTasks = tasks.filter(task => {
-    if (filters.member && task.assignee_id !== filters.member) return false;
+    if (filters.member) {
+      const hasAssignee = (task.assignees || []).some(a => a.id === filters.member);
+      if (!hasAssignee) return false;
+    }
     if (filters.project && task.project_id !== filters.project) return false;
     if (filters.priority && task.priority !== filters.priority) return false;
     if (filters.search) {
@@ -91,7 +95,7 @@ export default function ListView({ tasks, members, projects, currentMember, them
           ) : (
             filteredTasks.map(task => {
               const project = task.project;
-              const assignee = task.assignee;
+              const assignees = task.assignees || [];
               const isDone = task.status === 'done';
 
               return (
@@ -180,11 +184,12 @@ export default function ListView({ tasks, members, projects, currentMember, them
                     )}
                   </div>
 
-                  {/* Assignee */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {assignee && (
-                      <>
-                        <div style={{
+                  {/* Assignees */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    {assignees.slice(0, 2).map((assignee, i) => (
+                      <div
+                        key={assignee.id}
+                        style={{
                           width: '24px',
                           height: '24px',
                           borderRadius: '50%',
@@ -194,14 +199,20 @@ export default function ListView({ tasks, members, projects, currentMember, them
                           justifyContent: 'center',
                           color: 'white',
                           fontSize: '11px',
-                          fontWeight: '600'
-                        }}>
-                          {assignee.name[0]}
-                        </div>
-                        <span style={{ fontSize: '13px', color: theme.text }}>
-                          {assignee.name}
-                        </span>
-                      </>
+                          fontWeight: '600',
+                          marginLeft: i > 0 ? '-8px' : '0',
+                          border: `1.5px solid ${theme.surface}`,
+                          zIndex: 10 - i
+                        }}
+                        title={assignee.name}
+                      >
+                        {assignee.name[0]}
+                      </div>
+                    ))}
+                    {assignees.length > 2 && (
+                      <span style={{ fontSize: '11px', color: theme.textSecondary, marginLeft: '4px' }}>
+                        +{assignees.length - 2}
+                      </span>
                     )}
                   </div>
 
@@ -269,12 +280,43 @@ function TaskDetailModal({ task, theme, members, projects, currentMember, onClos
     status: task.status || 'todo',
     priority: task.priority || '',
     project_id: task.project_id || '',
-    assignee_id: task.assignee_id || '',
     due_date: task.due_date || '',
     hours: task.hours || ''
   });
+  const [assignees, setAssignees] = useState([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    loadAssignees();
+  }, [task.id]);
+
+  const loadAssignees = async () => {
+    try {
+      const data = await api.getAssignees(task.id);
+      setAssignees(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Failed to load assignees:', error);
+    }
+  };
+
+  const addAssignee = async (memberId) => {
+    try {
+      const data = await api.addAssignee(task.id, memberId);
+      setAssignees(prev => [...prev, data]);
+    } catch (error) {
+      console.error('Failed to add assignee:', error);
+    }
+  };
+
+  const removeAssignee = async (memberId) => {
+    try {
+      await api.removeAssignee(task.id, memberId);
+      setAssignees(prev => prev.filter(a => a.id !== memberId));
+    } catch (error) {
+      console.error('Failed to remove assignee:', error);
+    }
+  };
 
   const statuses = ['todo', 'in-progress', 'in-review', 'blocked', 'done'];
   const statusLabels = {
@@ -456,11 +498,40 @@ function TaskDetailModal({ task, theme, members, projects, currentMember, onClos
 
           <div>
             <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '6px' }}>
-              Assignee
+              Assignees
             </label>
+            <div style={{display:'flex', flexWrap:'wrap', gap:4, marginBottom:6}}>
+              {assignees.map(a => (
+                <div key={a.id} style={{
+                  display:'flex', alignItems:'center', gap:5,
+                  padding:'3px 8px', borderRadius:20,
+                  background: theme.surfaceHover,
+                  border: `0.5px solid ${theme.border}`,
+                  fontSize:11
+                }}>
+                  <div style={{
+                    width:14, height:14, borderRadius:'50%',
+                    background: a.avatar_color,
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                    fontSize:7, fontWeight:600, color:'#fff'
+                  }}>{a.name[0].toUpperCase()}</div>
+                  <span style={{color:theme.text}}>{a.name}</span>
+                  <button type="button" onClick={() => removeAssignee(a.id)} style={{
+                    background:'transparent', border:'none', cursor:'pointer',
+                    padding:0, display:'flex', color:theme.textSecondary
+                  }}>
+                    <X size={12}/>
+                  </button>
+                </div>
+              ))}
+            </div>
             <select
-              value={formData.assignee_id}
-              onChange={(e) => setFormData({ ...formData, assignee_id: e.target.value })}
+              value=""
+              onChange={async (e) => {
+                if (!e.target.value) return;
+                await addAssignee(e.target.value);
+                e.target.value = '';
+              }}
               style={{
                 width: '100%',
                 padding: '8px 12px',
@@ -472,8 +543,8 @@ function TaskDetailModal({ task, theme, members, projects, currentMember, onClos
                 outline: 'none'
               }}
             >
-              <option value="">None</option>
-              {members.map(member => (
+              <option value="">+ Add assignee</option>
+              {members.filter(m => !assignees.find(a => a.id === m.id)).map(member => (
                 <option key={member.id} value={member.id}>{member.name}</option>
               ))}
             </select>

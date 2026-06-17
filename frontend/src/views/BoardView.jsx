@@ -38,9 +38,10 @@ export default function BoardView({ tasks, members, projects, setProjects, curre
 
   const filteredTasks = tasks.filter(task => {
     // Sidebar filters
-    if (sidebarFilter === 'my-tasks' &&
-        task.assignee_id !== currentMember.id &&
-        !(task.collaborators || []).some(c => c.id === currentMember.id)) return false;
+    if (sidebarFilter === 'my-tasks') {
+      const isAssignedToMe = (task.assignees || []).some(a => a.id === currentMember.id);
+      if (!isAssignedToMe) return false;
+    }
     if (sidebarFilter === 'due-this-week') {
       if (!task.due_date) return false;
       const today = new Date();
@@ -52,7 +53,10 @@ export default function BoardView({ tasks, members, projects, setProjects, curre
     }
 
     // Toolbar filters
-    if (filters.member && task.assignee_id !== filters.member) return false;
+    if (filters.member) {
+      const hasAssignee = (task.assignees || []).some(a => a.id === filters.member);
+      if (!hasAssignee) return false;
+    }
     if (filters.project && task.project_id !== filters.project) return false;
     if (filters.priority && task.priority !== filters.priority) return false;
     if (filters.search) {
@@ -663,7 +667,7 @@ function ProjectDropdown({ value, onChange, projects, theme, onNewProject }) {
 
 function TaskCard({ task, theme, onClick, onDragStart }) {
   const project = task.project;
-  const assignee = task.assignee;
+  const assignees = task.assignees || [];
 
   return (
     <div
@@ -777,30 +781,29 @@ function TaskCard({ task, theme, onClick, onDragStart }) {
           )}
         </div>
 
-        {/* Assignee + collaborators */}
+        {/* Assignees */}
         <div style={{display:'flex', alignItems:'center', marginLeft:'auto'}}>
-          {/* Collaborators — small, overlapping */}
-          {(task.collaborators || []).slice(0,2).map((c, i) => (
-            <div key={c.id} style={{
-              width:16, height:16, borderRadius:'50%',
-              background: c.avatar_color,
+          {assignees.slice(0, 3).map((assignee, i) => (
+            <div key={assignee.id} style={{
+              width:18, height:18, borderRadius:'50%',
+              background: assignee.avatar_color,
               display:'flex', alignItems:'center', justifyContent:'center',
               fontSize:7, fontWeight:600, color:'#fff',
               marginLeft: i === 0 ? 0 : -4,
               border:`1.5px solid ${theme.surface}`,
-              zIndex: 2 - i
-            }}>{c.name[0].toUpperCase()}</div>
+              zIndex: 10 - i
+            }}>{assignee.name[0].toUpperCase()}</div>
           ))}
-          {/* Primary assignee — slightly larger */}
-          {assignee && (
+          {assignees.length > 3 && (
             <div style={{
               width:18, height:18, borderRadius:'50%',
-              background: assignee.avatar_color, border:`.5px solid ${theme.border}`,
+              background: theme.textTertiary,
               display:'flex', alignItems:'center', justifyContent:'center',
               fontSize:7, fontWeight:600, color:'#fff',
-              marginLeft: (task.collaborators||[]).length > 0 ? -4 : 0,
-              zIndex: 10
-            }}>{assignee.name[0].toUpperCase()}</div>
+              marginLeft: -4,
+              border:`1.5px solid ${theme.surface}`,
+              zIndex: 5
+            }}>+{assignees.length - 3}</div>
           )}
         </div>
       </div>
@@ -898,7 +901,7 @@ function NewTaskModal({ theme, members, projects, currentMember, onClose, onSave
     status: 'todo',
     priority: '',
     project_id: '',
-    assignee_id: '',
+    assignees: [],
     due_date: '',
     hours: '',
     created_by: currentMember.id
@@ -1101,11 +1104,45 @@ function NewTaskModal({ theme, members, projects, currentMember, onClose, onSave
 
             <div>
               <label style={{ display: 'block', fontSize: '13px', fontWeight: '500', marginBottom: '6px' }}>
-                Assignee
+                Assignees
               </label>
+              <div style={{display:'flex', flexWrap:'wrap', gap:4, marginBottom:6}}>
+                {formData.assignees.map(memberId => {
+                  const member = members.find(m => m.id === memberId);
+                  return member ? (
+                    <div key={member.id} style={{
+                      display:'flex', alignItems:'center', gap:5,
+                      padding:'3px 8px', borderRadius:20,
+                      background: theme.surfaceHover,
+                      border: `0.5px solid ${theme.border}`,
+                      fontSize:11
+                    }}>
+                      <div style={{
+                        width:14, height:14, borderRadius:'50%',
+                        background: member.avatar_color,
+                        display:'flex', alignItems:'center', justifyContent:'center',
+                        fontSize:7, fontWeight:600, color:'#fff'
+                      }}>{member.name[0].toUpperCase()}</div>
+                      <span style={{color:theme.text}}>{member.name}</span>
+                      <button type="button" onClick={() => {
+                        setFormData({...formData, assignees: formData.assignees.filter(id => id !== memberId)});
+                      }} style={{
+                        background:'transparent', border:'none', cursor:'pointer',
+                        padding:0, display:'flex', color:theme.textSecondary
+                      }}>
+                        <X size={12}/>
+                      </button>
+                    </div>
+                  ) : null;
+                })}
+              </div>
               <select
-                value={formData.assignee_id}
-                onChange={(e) => setFormData({ ...formData, assignee_id: e.target.value })}
+                value=""
+                onChange={(e) => {
+                  if (e.target.value && !formData.assignees.includes(e.target.value)) {
+                    setFormData({...formData, assignees: [...formData.assignees, e.target.value]});
+                  }
+                }}
                 style={{
                   width: '100%',
                   padding: '8px 12px',
@@ -1117,8 +1154,8 @@ function NewTaskModal({ theme, members, projects, currentMember, onClose, onSave
                   outline: 'none'
                 }}
               >
-                <option value="">None</option>
-                {members.map(member => (
+                <option value="">+ Add assignee</option>
+                {members.filter(m => !formData.assignees.includes(m.id)).map(member => (
                   <option key={member.id} value={member.id}>{member.name}</option>
                 ))}
               </select>
@@ -1231,13 +1268,12 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
     status: task.status || 'todo',
     priority: task.priority || '',
     project_id: task.project_id || '',
-    assignee_id: task.assignee_id || '',
     due_date: task.due_date || '',
     hours: task.hours || ''
   });
   const [comments, setComments] = useState([]);
   const [docs, setDocs] = useState([]);
-  const [collaborators, setCollaborators] = useState([]);
+  const [assignees, setAssignees] = useState([]);
   const [newComment, setNewComment] = useState('');
   const [newDocUrl, setNewDocUrl] = useState('');
   const [newDocTitle, setNewDocTitle] = useState('');
@@ -1273,7 +1309,7 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
   useEffect(() => {
     loadComments();
     loadDocs();
-    loadCollaborators();
+    loadAssignees();
   }, [task.id]);
 
   // Sync localTaskTags when task.tags changes from parent
@@ -1299,38 +1335,30 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
     }
   };
 
-  const loadCollaborators = async () => {
+  const loadAssignees = async () => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/tasks/${task.id}/collaborators`);
-      const data = await res.json();
-      setCollaborators(Array.isArray(data) ? data : []);
+      const data = await api.getAssignees(task.id);
+      setAssignees(Array.isArray(data) ? data : []);
     } catch (error) {
-      console.error('Failed to load collaborators:', error);
+      console.error('Failed to load assignees:', error);
     }
   };
 
-  const addCollaborator = async (memberId) => {
+  const addAssignee = async (memberId) => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/tasks/${task.id}/collaborators`, {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ member_id: memberId })
-      });
-      const data = await res.json();
-      setCollaborators(prev => [...prev, data]);
+      const data = await api.addAssignee(task.id, memberId);
+      setAssignees(prev => [...prev, data]);
     } catch (error) {
-      console.error('Failed to add collaborator:', error);
+      console.error('Failed to add assignee:', error);
     }
   };
 
-  const removeCollaborator = async (memberId) => {
+  const removeAssignee = async (memberId) => {
     try {
-      await fetch(`${import.meta.env.VITE_API_URL || ''}/api/tasks/${task.id}/collaborators/${memberId}`, {
-        method: 'DELETE'
-      });
-      setCollaborators(prev => prev.filter(c => c.id !== memberId));
+      await api.removeAssignee(task.id, memberId);
+      setAssignees(prev => prev.filter(a => a.id !== memberId));
     } catch (error) {
-      console.error('Failed to remove collaborator:', error);
+      console.error('Failed to remove assignee:', error);
     }
   };
 
@@ -2235,38 +2263,11 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
 
           <div style={{ marginBottom: '16px' }}>
             <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '6px', color: theme.textSecondary }}>
-              Assignee
+              Assignees
             </label>
-            <select
-              value={formData.assignee_id}
-              onChange={(e) => setFormData({ ...formData, assignee_id: e.target.value })}
-              style={{
-                width: '100%',
-                padding: '6px 10px',
-                background: theme.background,
-                border: `0.5px solid ${theme.border}`,
-                borderRadius: '4px',
-                color: theme.text,
-                fontSize: '12px',
-                outline: 'none'
-              }}
-            >
-              <option value="">None</option>
-              {members.map(member => (
-                <option key={member.id} value={member.id}>{member.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Collaborators section */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', marginBottom: '6px', color: theme.textSecondary }}>
-              Collaborators
-            </label>
-            {/* Existing collaborators */}
             <div style={{display:'flex', flexWrap:'wrap', gap:4, marginBottom:6}}>
-              {collaborators.map(c => (
-                <div key={c.id} style={{
+              {assignees.map(a => (
+                <div key={a.id} style={{
                   display:'flex', alignItems:'center', gap:5,
                   padding:'3px 8px', borderRadius:20,
                   background:theme.background, border:`.5px solid ${theme.border}`,
@@ -2274,23 +2275,22 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
                 }}>
                   <div style={{
                     width:16, height:16, borderRadius:'50%',
-                    background:c.avatar_color,
+                    background:a.avatar_color,
                     display:'flex', alignItems:'center', justifyContent:'center',
                     fontSize:7, fontWeight:600, color:'#fff'
-                  }}>{c.name[0].toUpperCase()}</div>
-                  {c.name}
+                  }}>{a.name[0].toUpperCase()}</div>
+                  {a.name}
                   <span
-                    onClick={() => removeCollaborator(c.id)}
+                    onClick={() => removeAssignee(a.id)}
                     style={{fontSize:10, color:theme.textTertiary, cursor:'pointer', marginLeft:2}}
                   >✕</span>
                 </div>
               ))}
             </div>
-            {/* Add collaborator dropdown */}
             <select
               onChange={async (e) => {
                 if (!e.target.value) return;
-                await addCollaborator(e.target.value);
+                await addAssignee(e.target.value);
                 e.target.value = '';
               }}
               style={{
@@ -2299,9 +2299,9 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
                 color:theme.text, fontFamily:'inherit', cursor:'pointer', outline:'none'
               }}
             >
-              <option value="">+ Add collaborator</option>
+              <option value="">+ Add assignee</option>
               {members
-                .filter(m => m.id !== formData.assignee_id && !collaborators.find(c => c.id === m.id))
+                .filter(m => !assignees.find(a => a.id === m.id))
                 .map(m => (
                   <option key={m.id} value={m.id}>{m.name}</option>
                 ))

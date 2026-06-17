@@ -620,7 +620,6 @@ app.get('/api/tasks', async (req, res) => {
       .select(`
         *,
         project:px_projects(id, name, color),
-        assignee:px_members!assignee_id(id, name, avatar_color),
         tags:px_task_tags(tag:px_tags(*))
       `)
       .eq('workspace_id', workspace_id)
@@ -656,9 +655,9 @@ app.get('/api/tasks', async (req, res) => {
         .select('*', { count: 'exact', head: true })
         .eq('task_id', task.id);
 
-      // Fetch collaborators
-      const { data: collabs } = await supabaseAdmin
-        .from('px_task_collaborators')
+      // Fetch assignees
+      const { data: assignees } = await supabaseAdmin
+        .from('px_task_assignees')
         .select('member_id, px_members(id, name, avatar_color)')
         .eq('task_id', task.id);
 
@@ -667,9 +666,9 @@ app.get('/api/tasks', async (req, res) => {
         tags: task.tags?.map(t => t.tag) || [],
         comment_count: commentCount || 0,
         doc_count: docCount || 0,
-        collaborators: (collabs || []).map(c => ({
-          ...c.px_members,
-          avatar_letter: c.px_members.name[0].toUpperCase()
+        assignees: (assignees || []).map(a => ({
+          ...a.px_members,
+          avatar_letter: a.px_members.name[0].toUpperCase()
         }))
       };
     }));
@@ -684,7 +683,7 @@ app.get('/api/tasks', async (req, res) => {
 // Create task
 app.post('/api/tasks', async (req, res) => {
   try {
-    const taskData = nullifyEmptyStrings(req.body);
+    const { assignees, ...taskData } = nullifyEmptyStrings(req.body);
 
     const { data, error } = await supabaseAdmin
       .from('px_tasks')
@@ -693,6 +692,16 @@ app.post('/api/tasks', async (req, res) => {
       .single();
 
     if (error) throw error;
+
+    // Insert assignees if provided
+    if (assignees && Array.isArray(assignees) && assignees.length > 0) {
+      const assigneeRecords = assignees.map(memberId => ({
+        task_id: data.id,
+        member_id: memberId
+      }));
+      await supabaseAdmin.from('px_task_assignees').insert(assigneeRecords);
+    }
+
     res.json(data);
   } catch (error) {
     logError('POST /api/tasks', error);
@@ -1003,11 +1012,12 @@ app.delete('/api/tasks/:taskId/tags/:tagId', async (req, res) => {
 // ==================== TASK COLLABORATORS ENDPOINTS ====================
 
 // Get collaborators for a task
-app.get('/api/tasks/:id/collaborators', async (req, res) => {
+// Get task assignees
+app.get('/api/tasks/:id/assignees', async (req, res) => {
   try {
     const { id } = req.params;
     const { data, error } = await supabaseAdmin
-      .from('px_task_collaborators')
+      .from('px_task_assignees')
       .select(`
         member_id,
         px_members (id, name, avatar_color)
@@ -1016,29 +1026,29 @@ app.get('/api/tasks/:id/collaborators', async (req, res) => {
 
     if (error) throw error;
 
-    const collaborators = (data || []).map(c => ({
-      ...c.px_members,
-      avatar_letter: c.px_members.name[0].toUpperCase()
+    const assignees = (data || []).map(a => ({
+      ...a.px_members,
+      avatar_letter: a.px_members.name[0].toUpperCase()
     }));
 
-    res.json(collaborators);
+    res.json(assignees);
   } catch (error) {
-    logError('GET /api/tasks/:id/collaborators', error);
+    logError('GET /api/tasks/:id/assignees', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Add collaborator to task
-app.post('/api/tasks/:id/collaborators', async (req, res) => {
+// Add assignee to task
+app.post('/api/tasks/:id/assignees', async (req, res) => {
   try {
     const { id } = req.params;
     const { member_id } = req.body;
 
     if (!member_id) return res.status(400).json({ error: 'member_id required' });
 
-    // Insert collaborator
+    // Insert assignee
     const { error: insertError } = await supabaseAdmin
-      .from('px_task_collaborators')
+      .from('px_task_assignees')
       .insert({ task_id: id, member_id });
 
     if (insertError) throw insertError;
@@ -1057,18 +1067,18 @@ app.post('/api/tasks/:id/collaborators', async (req, res) => {
       avatar_letter: member.name[0].toUpperCase()
     });
   } catch (error) {
-    logError('POST /api/tasks/:id/collaborators', error);
+    logError('POST /api/tasks/:id/assignees', error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Remove collaborator from task
-app.delete('/api/tasks/:id/collaborators/:member_id', async (req, res) => {
+// Remove assignee from task
+app.delete('/api/tasks/:id/assignees/:member_id', async (req, res) => {
   try {
     const { id, member_id } = req.params;
 
     const { error } = await supabaseAdmin
-      .from('px_task_collaborators')
+      .from('px_task_assignees')
       .delete()
       .eq('task_id', id)
       .eq('member_id', member_id);
@@ -1076,7 +1086,7 @@ app.delete('/api/tasks/:id/collaborators/:member_id', async (req, res) => {
     if (error) throw error;
     res.json({ success: true });
   } catch (error) {
-    logError('DELETE /api/tasks/:id/collaborators/:member_id', error);
+    logError('DELETE /api/tasks/:id/assignees/:member_id', error);
     res.status(500).json({ error: error.message });
   }
 });

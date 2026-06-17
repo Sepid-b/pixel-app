@@ -115,5 +115,15 @@ export const api = {
   }),
   deleteTimeEntry: (id) => apiCall(`/api/time-entries/${id}`, {
     method: 'DELETE'
+  }),
+
+  // Assignees
+  getAssignees: (taskId) => apiCall(`/api/tasks/${taskId}/assignees`),
+  addAssignee: (taskId, memberId) => apiCall(`/api/tasks/${taskId}/assignees`, {
+    method: 'POST',
+    body: JSON.stringify({ member_id: memberId })
+  }),
+  removeAssignee: (taskId, memberId) => apiCall(`/api/tasks/${taskId}/assignees/${memberId}`, {
+    method: 'DELETE'
   })
 };
