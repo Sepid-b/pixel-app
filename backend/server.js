@@ -1906,6 +1906,94 @@ app.put('/api/workspaces/:id', async (req, res) => {
   }
 });
 
+// Get my role in workspace
+app.get('/api/workspaces/:id/my-role', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { member_id } = req.query;
+
+    const { data, error } = await supabaseAdmin
+      .from('px_workspace_members')
+      .select('role')
+      .eq('workspace_id', id)
+      .eq('member_id', member_id)
+      .single();
+
+    if (error) throw error;
+    res.json({ role: data?.role || 'member' });
+  } catch (error) {
+    logError('GET /api/workspaces/:id/my-role', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update member role in workspace
+app.put('/api/workspaces/:id/members/:member_id/role', async (req, res) => {
+  try {
+    const { id, member_id } = req.params;
+    const { role } = req.body;
+
+    const { data, error } = await supabaseAdmin
+      .from('px_workspace_members')
+      .update({ role })
+      .eq('workspace_id', id)
+      .eq('member_id', member_id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    logError('PUT /api/workspaces/:id/members/:member_id/role', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get workspace members with roles
+app.get('/api/workspaces/:id/members', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data, error } = await supabaseAdmin
+      .from('px_workspace_members')
+      .select('member_id, role')
+      .eq('workspace_id', id);
+
+    if (error) throw error;
+    res.json(data);
+  } catch (error) {
+    logError('GET /api/workspaces/:id/members', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete workspace
+app.delete('/api/workspaces/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Delete all workspace data
+    await supabaseAdmin.from('px_tasks').delete().eq('workspace_id', id);
+    await supabaseAdmin.from('px_projects').delete().eq('workspace_id', id);
+    await supabaseAdmin.from('px_standups').delete().eq('workspace_id', id);
+    await supabaseAdmin.from('px_time_entries').delete().eq('workspace_id', id);
+    await supabaseAdmin.from('px_tags').delete().eq('workspace_id', id);
+    await supabaseAdmin.from('px_workspace_members').delete().eq('workspace_id', id);
+    await supabaseAdmin.from('px_join_requests').delete().eq('workspace_id', id);
+
+    const { error } = await supabaseAdmin
+      .from('px_workspaces')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (error) {
+    logError('DELETE /api/workspaces/:id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`✓ Backend server running on http://localhost:${PORT}`);

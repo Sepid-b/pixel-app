@@ -9,6 +9,7 @@ import StandupView from './views/StandupView';
 import ProjectsView from './views/ProjectsView';
 import TimeView from './views/TimeView';
 import MembersView from './views/MembersView';
+import WorkspaceSettings from './views/WorkspaceSettings';
 import { Sun, Moon, ChevronLeft, ChevronRight, Home, User, Calendar, Clock, Folder, FileText, Activity, Logout, Users, Briefcase, ChevronDown } from 'tabler-icons-react';
 
 const themes = {
@@ -71,6 +72,8 @@ export default function App() {
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [showWorkspaceFlow, setShowWorkspaceFlow] = useState(false);
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
+  const [myRole, setMyRole] = useState('member');
+  const [pendingCount, setPendingCount] = useState(0);
 
   const currentTheme = themes[theme];
 
@@ -94,19 +97,21 @@ export default function App() {
 
   // Load data when workspace is selected
   useEffect(() => {
-    if (currentWorkspace) {
+    if (currentWorkspace && currentMember) {
       loadMembers().then(() => {
         fetchMemberTasks();
       });
       loadProjects();
       loadTasks();
       loadVibes();
+      fetchMyRole();
+      fetchPendingCount();
 
       // Set up realtime subscription and return cleanup function
       const cleanup = setupRealtimeSubscription();
       return cleanup;
     }
-  }, [currentWorkspace]);
+  }, [currentWorkspace, currentMember]);
 
   useEffect(() => {
     if (currentMember) {
@@ -224,6 +229,29 @@ export default function App() {
       setMemberTasks(taskMap);
     } catch (error) {
       console.error('Failed to fetch member tasks:', error);
+    }
+  };
+
+  const fetchMyRole = async () => {
+    if (!currentWorkspace || !currentMember) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/workspaces/${currentWorkspace.id}/my-role?member_id=${currentMember.id}`);
+      const data = await res.json();
+      setMyRole(data.role || 'member');
+    } catch (error) {
+      console.error('Failed to fetch my role:', error);
+    }
+  };
+
+  const fetchPendingCount = async () => {
+    if (!currentWorkspace || !currentMember) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/workspaces/${currentWorkspace.id}/requests`);
+      const data = await res.json();
+      const pending = Array.isArray(data) ? data.filter(r => r.status === 'pending').length : 0;
+      setPendingCount(pending);
+    } catch (error) {
+      console.error('Failed to fetch pending count:', error);
     }
   };
 
@@ -1054,7 +1082,21 @@ export default function App() {
                         {currentWorkspace.name}
                       </span>
                     </div>
-                    <ChevronDown size={14} style={{ flexShrink: 0, color: currentTheme.textSecondary }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {myRole === 'admin' && pendingCount > 0 && (
+                        <span style={{
+                          background: '#e74c3c',
+                          color: '#fff',
+                          fontSize: 9,
+                          padding: '1px 5px',
+                          borderRadius: 8,
+                          fontWeight: 600
+                        }}>
+                          {pendingCount}
+                        </span>
+                      )}
+                      <ChevronDown size={14} style={{ flexShrink: 0, color: currentTheme.textSecondary }} />
+                    </div>
                   </div>
 
                   {/* Workspace switcher dropdown */}
@@ -1074,6 +1116,24 @@ export default function App() {
                         overflowY: 'auto'
                       }}
                     >
+                      <div
+                        onClick={() => {
+                          setActiveView('workspace-settings');
+                          setSwitcherOpen(false);
+                        }}
+                        style={{
+                          padding: '10px 12px',
+                          cursor: 'pointer',
+                          borderBottom: `.5px solid ${currentTheme.border}`,
+                          fontSize: 12,
+                          fontWeight: 500,
+                          color: currentTheme.textSecondary
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = currentTheme.surfaceHover}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        ⚙️ Workspace Settings
+                      </div>
                       {myWorkspaces.map((ws) => (
                         <div
                           key={ws.workspace.id}
@@ -1269,6 +1329,18 @@ export default function App() {
               setMembers={setMembers}
               currentWorkspace={currentWorkspace}
               myWorkspace={myWorkspaces.find(w => w.workspace.id === currentWorkspace?.id)}
+            />
+          )}
+          {activeView === 'workspace-settings' && (
+            <WorkspaceSettings
+              T={currentTheme}
+              currentWorkspace={currentWorkspace}
+              currentMember={currentMember}
+              members={members}
+              myRole={myRole}
+              onClose={() => setActiveView('board')}
+              setCurrentWorkspace={setCurrentWorkspace}
+              setMyWorkspaces={setMyWorkspaces}
             />
           )}
           {activeView === 'docs' && (
