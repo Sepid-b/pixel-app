@@ -371,6 +371,12 @@ export default function TimeView({ T, currentMember, members, projects, currentW
       const result = await response.json();
       console.log('Save result:', result);
 
+      // Navigate to the week containing the logged date
+      const loggedWeekStart = getMonday(new Date(form.date));
+      if (loggedWeekStart !== weekStart) {
+        setWeekStart(loggedWeekStart);
+      }
+
       setForm({
         ...form,
         hours: '',
