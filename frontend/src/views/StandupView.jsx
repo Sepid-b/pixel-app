@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp } from 'tabler-icons-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-export default function StandupView({ T, currentMember, members }) {
+export default function StandupView({ T, currentMember, members, currentWorkspace }) {
   const [activeTab, setActiveTab] = useState('today');
   const [todayData, setTodayData] = useState([]);
   const [myDraft, setMyDraft] = useState({ blockers: '', today: '', vibe: 3 });
@@ -32,8 +32,9 @@ export default function StandupView({ T, currentMember, members }) {
   }, [historyPeriod, activeTab]);
 
   const loadTodayData = async () => {
+    if (!currentWorkspace) return;
     try {
-      const response = await fetch(`${API_BASE}/api/standup/today`);
+      const response = await fetch(`${API_BASE}/api/standup/today?workspace_id=${currentWorkspace.id}`);
       const data = await response.json();
       setTodayData(data);
 
@@ -57,10 +58,11 @@ export default function StandupView({ T, currentMember, members }) {
   };
 
   const loadHistory = async () => {
+    if (!currentWorkspace) return;
     console.log('Fetching history, period:', historyPeriod, 'page:', historyPage);
     setLoadingHistory(true);
     try {
-      const res = await fetch(`${API_BASE}/api/standup/history?period=${historyPeriod}&page=${historyPage}`);
+      const res = await fetch(`${API_BASE}/api/standup/history?period=${historyPeriod}&page=${historyPage}&workspace_id=${currentWorkspace.id}`);
       console.log('History response status:', res.status);
       const data = await res.json();
       console.log('History data:', data);
@@ -74,6 +76,7 @@ export default function StandupView({ T, currentMember, members }) {
   };
 
   const handleSaveStandup = async () => {
+    if (!currentWorkspace) return;
     setSaving(true);
     try {
       const res = await fetch(`${API_BASE}/api/standup/today`, {
@@ -81,6 +84,7 @@ export default function StandupView({ T, currentMember, members }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           member_id: currentMember.id,
+          workspace_id: currentWorkspace.id,
           ...myDraft
         })
       });

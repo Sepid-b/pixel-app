@@ -1301,6 +1301,7 @@ export default function App() {
               T={currentTheme}
               currentMember={currentMember}
               members={members}
+              currentWorkspace={currentWorkspace}
             />
           )}
           {activeView === 'time' && (
@@ -1309,6 +1310,7 @@ export default function App() {
               currentMember={currentMember}
               members={members}
               projects={projects}
+              currentWorkspace={currentWorkspace}
             />
           )}
           {activeView === 'projects' && (
@@ -1319,6 +1321,7 @@ export default function App() {
               projects={projects}
               setProjects={setProjects}
               onProjectsChange={loadProjects}
+              currentWorkspace={currentWorkspace}
             />
           )}
           {activeView === 'members' && (

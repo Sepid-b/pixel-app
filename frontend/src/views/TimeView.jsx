@@ -248,7 +248,7 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick }) => {
   );
 };
 
-export default function TimeView({ T, currentMember, members, projects }) {
+export default function TimeView({ T, currentMember, members, projects, currentWorkspace }) {
   const logFormRef = useRef(null);
   const [weekStart, setWeekStart] = useState(getMonday(new Date()));
   const [timeData, setTimeData] = useState([]);
@@ -284,8 +284,9 @@ export default function TimeView({ T, currentMember, members, projects }) {
   }, [selectedMember]);
 
   const loadTimeData = async () => {
+    if (!currentWorkspace) return;
     try {
-      const response = await fetch(`${API_BASE}/api/time?member_id=${currentMember.id}&week_start=${weekStart}`);
+      const response = await fetch(`${API_BASE}/api/time?member_id=${currentMember.id}&week_start=${weekStart}&workspace_id=${currentWorkspace.id}`);
       const data = await response.json();
       console.log('Loaded time data:', data);
       setTimeData(data.time_data || []);
