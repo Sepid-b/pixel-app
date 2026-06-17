@@ -270,13 +270,13 @@ export default function TimeView({ T, currentMember, members, projects, currentW
   const [heatmapPeriod, setHeatmapPeriod] = useState('annually');
 
   useEffect(() => {
-    if (currentMember) {
+    if (currentMember && currentWorkspace) {
       setSelectedMember(currentMember);
       loadTimeData();
       loadStats();
       loadTasks();
     }
-  }, [weekStart, currentMember]);
+  }, [weekStart, currentMember, currentWorkspace]);
 
   useEffect(() => {
     if (!selectedMember) return;
@@ -319,10 +319,14 @@ export default function TimeView({ T, currentMember, members, projects, currentW
   };
 
   const loadTasks = async () => {
+    if (!currentWorkspace) return;
     try {
-      const response = await fetch(`${API_BASE}/api/tasks`);
+      const response = await fetch(`${API_BASE}/api/tasks?workspace_id=${currentWorkspace.id}`);
       const data = await response.json();
-      const myTasks = data.filter(t => t.assignee_id === currentMember.id);
+      const myTasks = data.filter(t => {
+        const assignees = t.assignees || [];
+        return assignees.some(a => a.id === currentMember.id);
+      });
       setTasks(myTasks);
     } catch (error) {
       console.error('Failed to load tasks:', error);
