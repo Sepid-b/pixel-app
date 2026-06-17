@@ -447,6 +447,12 @@ export default function TimeView({ T, currentMember, members, projects, currentW
     return Object.values(grouped);
   };
 
+  const getDayEntries = (dateStr) => {
+    return timeData
+      .flatMap(m => m.entries || [])
+      .filter(e => e.date === dateStr && e.member_id === selectedMember?.id);
+  };
+
   const currentWeek = getMonday(new Date());
   const isCurrentWeek = weekStart === currentWeek;
 
@@ -626,7 +632,7 @@ export default function TimeView({ T, currentMember, members, projects, currentW
         </div>
       </div>
 
-      {/* Day Detail Bar Chart (conditional) */}
+      {/* Day Detail with Entries (conditional) */}
       {selectedDay && (
         <div style={{ padding: 0 }}>
           <div style={{
@@ -641,7 +647,7 @@ export default function TimeView({ T, currentMember, members, projects, currentW
                 <div style={{ fontSize: 12, fontWeight: 500, color: T.text }}>
                   {new Date(selectedDay).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                 </div>
-                <div style={{ fontSize: 11, color: T.textTertiary, marginTop: 2 }}>Hours by project</div>
+                <div style={{ fontSize: 11, color: T.textTertiary, marginTop: 2 }}>Time entries</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 500, color: '#7c6bf0' }}>
@@ -662,34 +668,55 @@ export default function TimeView({ T, currentMember, members, projects, currentW
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {getDayProjects(selectedDay).map(proj => (
-                <div key={proj.project_id || 'none'} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 2,
-                    background: proj.color || '#7c6bf0',
-                    flexShrink: 0
-                  }} />
-                  <div style={{ fontSize: 11, color: T.textSecondary, width: 140, flexShrink: 0 }}>
-                    {proj.name || 'No project'}
-                  </div>
-                  <div style={{ flex: 1, height: 8, background: T.bg3 || T.surfaceHover, borderRadius: 4, overflow: 'hidden' }}>
-                    <div style={{
-                      height: '100%',
-                      borderRadius: 4,
-                      background: proj.color || '#7c6bf0',
-                      width: `${(proj.hours / getDayTotal(selectedDay)) * 100}%`
-                    }} />
-                  </div>
-                  <div style={{ fontSize: 11, color: T.text, fontWeight: 500, width: 32, textAlign: 'right', flexShrink: 0 }}>
-                    {proj.hours}h
-                  </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {getDayEntries(selectedDay).length === 0 ? (
+                <div style={{ fontSize: 11, color: T.textTertiary, textAlign: 'center', padding: '12px 0' }}>
+                  No hours logged on this day
                 </div>
-              ))}
-              {getDayProjects(selectedDay).length === 0 && (
-                <div style={{ fontSize: 11, color: T.textTertiary }}>No hours logged on this day</div>
+              ) : (
+                getDayEntries(selectedDay).map(entry => (
+                  <div
+                    key={entry.id}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                      padding: '10px 12px',
+                      background: T.surfaceHover,
+                      borderRadius: 6,
+                      border: `0.5px solid ${T.border}`
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {entry.project_color && (
+                        <div style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: 2,
+                          background: entry.project_color,
+                          flexShrink: 0
+                        }} />
+                      )}
+                      <span style={{ flex: 1, fontSize: 12, color: T.text, fontWeight: 500 }}>
+                        {entry.task_title || entry.project_name || 'General'}
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#7c6bf0' }}>
+                        {entry.hours}h
+                      </span>
+                    </div>
+                    {entry.notes && (
+                      <div style={{
+                        fontSize: 11,
+                        color: T.textSecondary,
+                        fontStyle: 'italic',
+                        paddingLeft: 16,
+                        lineHeight: 1.4
+                      }}>
+                        "{entry.notes}"
+                      </div>
+                    )}
+                  </div>
+                ))
               )}
             </div>
           </div>
