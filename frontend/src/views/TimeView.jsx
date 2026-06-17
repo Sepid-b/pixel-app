@@ -298,8 +298,9 @@ export default function TimeView({ T, currentMember, members, projects, currentW
   };
 
   const loadStats = async () => {
+    if (!currentWorkspace) return;
     try {
-      const response = await fetch(`${API_BASE}/api/time/stats?member_id=${currentMember.id}&week_start=${weekStart}`);
+      const response = await fetch(`${API_BASE}/api/time/stats?member_id=${currentMember.id}&week_start=${weekStart}&workspace_id=${currentWorkspace.id}`);
       const data = await response.json();
       console.log('Loaded stats:', data);
       setStats(data);
@@ -309,8 +310,9 @@ export default function TimeView({ T, currentMember, members, projects, currentW
   };
 
   const loadHeatmap = async (memberId) => {
+    if (!currentWorkspace) return;
     try {
-      const response = await fetch(`${API_BASE}/api/time/heatmap?member_id=${memberId}`);
+      const response = await fetch(`${API_BASE}/api/time/heatmap?member_id=${memberId}&workspace_id=${currentWorkspace.id}`);
       const data = await response.json();
       console.log('Loaded heatmap:', data);
       setHeatmapData(Array.isArray(data) ? data : []);
@@ -341,7 +343,8 @@ export default function TimeView({ T, currentMember, members, projects, currentW
       member_id: currentMember.id,
       date: form.date,
       hours: parseFloat(form.hours),
-      notes: form.notes || null
+      notes: form.notes || null,
+      workspace_id: currentWorkspace?.id || null
     };
 
     if (logType === 'task') {

@@ -41,7 +41,8 @@
       "Bash(railway:*)",
       "Bash(vercel --version:*)",
       "Bash(vercel login:*)",
-      "Bash(vercel:*)"
+      "Bash(vercel:*)",
+      "Bash(logged\" even though the heatmap displayed hours. This happened because\nthe day detail view only had access to the current week''s data, not\nhistorical data from other weeks.\n\nSolution:\n- Added selectedDayEntries state to store entries for clicked day\n- Updated handleDayClick to fetch entries for the specific day''s week\n- Modified getDayTotal, getDayProjects, getDayEntries to use\n  selectedDayEntries instead of timeData\n- Now clicking any day in heatmap \\(past, present, or future\\) shows\n  the correct entries with notes\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
     ]
   }
 }

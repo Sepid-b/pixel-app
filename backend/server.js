@@ -1376,7 +1376,7 @@ app.get('/api/time', async (req, res) => {
         task:px_tasks(id, title),
         project:px_projects(id, name, color)
       `)
-      .eq('workspace_id', workspace_id)
+      .or(`workspace_id.eq.${workspace_id},workspace_id.is.null`)
       .gte('date', weekStartStr)
       .lte('date', weekEndStr)
       .order('date', { ascending: false });
@@ -1391,12 +1391,15 @@ app.get('/api/time', async (req, res) => {
         total_hours: Math.round(total_hours * 10) / 10,
         entries: memberEntries.map(e => ({
           id: e.id,
+          task_id: e.task_id,
+          project_id: e.project_id,
+          member_id: e.member_id,
           task_title: e.task?.title || null,
           project_name: e.project?.name || null,
           project_color: e.project?.color || null,
           date: e.date,
           hours: e.hours,
-          note: e.note
+          notes: e.notes
         }))
       };
     });
@@ -1430,7 +1433,7 @@ app.get('/api/time', async (req, res) => {
 // Get time stats for the week
 app.get('/api/time/stats', async (req, res) => {
   try {
-    const { member_id, week_start } = req.query;
+    const { member_id, week_start, workspace_id } = req.query;
 
     // This week dates
     const weekStartDate = new Date(week_start);
@@ -1448,29 +1451,49 @@ app.get('/api/time/stats', async (req, res) => {
     const lastWeekStartStr = lastWeekStartDate.toISOString().split('T')[0];
     const lastWeekEndStr = lastWeekEndDate.toISOString().split('T')[0];
 
-    // Get all members
+    // Get workspace members
+    const { data: workspaceMembers } = await supabaseAdmin
+      .from('px_workspace_members')
+      .select('member_id')
+      .eq('workspace_id', workspace_id);
+
+    const memberIds = workspaceMembers?.map(wm => wm.member_id) || [];
+
     const { data: members } = await supabase
       .from('px_members')
-      .select('*');
+      .select('*')
+      .in('id', memberIds);
 
     const stats = await Promise.all(members.map(async (member) => {
       // This week hours
-      const { data: thisWeekEntries } = await supabase
+      let thisWeekQuery = supabase
         .from('px_time_entries')
         .select('hours')
         .eq('member_id', member.id)
         .gte('date', weekStartStr)
         .lte('date', weekEndStr);
 
+      if (workspace_id) {
+        thisWeekQuery = thisWeekQuery.or(`workspace_id.eq.${workspace_id},workspace_id.is.null`);
+      }
+
+      const { data: thisWeekEntries } = await thisWeekQuery;
+
       const this_week_hours = thisWeekEntries?.reduce((sum, e) => sum + (e.hours || 0), 0) || 0;
 
       // Last week hours
-      const { data: lastWeekEntries } = await supabase
+      let lastWeekQuery = supabase
         .from('px_time_entries')
         .select('hours')
         .eq('member_id', member.id)
         .gte('date', lastWeekStartStr)
         .lte('date', lastWeekEndStr);
+
+      if (workspace_id) {
+        lastWeekQuery = lastWeekQuery.or(`workspace_id.eq.${workspace_id},workspace_id.is.null`);
+      }
+
+      const { data: lastWeekEntries } = await lastWeekQuery;
 
       const last_week_hours = lastWeekEntries?.reduce((sum, e) => sum + (e.hours || 0), 0) || 0;
 
@@ -1548,16 +1571,22 @@ app.delete('/api/time/:id', async (req, res) => {
 // Get heatmap data (past year)
 app.get('/api/time/heatmap', async (req, res) => {
   try {
-    const { member_id } = req.query;
+    const { member_id, workspace_id } = req.query;
     const oneYearAgo = new Date();
     oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
     const fromDate = oneYearAgo.toISOString().split('T')[0];
 
-    const { data, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('px_time_entries')
       .select('date, hours')
       .eq('member_id', member_id)
       .gte('date', fromDate);
+
+    if (workspace_id) {
+      query = query.or(`workspace_id.eq.${workspace_id},workspace_id.is.null`);
+    }
+
+    const { data, error } = await query;
 
     if (error) return res.status(500).json({ error: error.message });
 
