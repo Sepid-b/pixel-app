@@ -268,6 +268,7 @@ export default function TimeView({ T, currentMember, members, projects, currentW
   const [saving, setSaving] = useState(false);
   const [heatmapData, setHeatmapData] = useState([]);
   const [heatmapPeriod, setHeatmapPeriod] = useState('annually');
+  const [selectedDayEntries, setSelectedDayEntries] = useState([]);
 
   useEffect(() => {
     if (currentMember && currentWorkspace) {
@@ -422,23 +423,37 @@ export default function TimeView({ T, currentMember, members, projects, currentW
     return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
   };
 
-  const handleDayClick = (dateStr) => {
-    setSelectedDay(selectedDay === dateStr ? null : dateStr);
+  const handleDayClick = async (dateStr) => {
+    if (selectedDay === dateStr) {
+      setSelectedDay(null);
+      setSelectedDayEntries([]);
+      return;
+    }
+
+    setSelectedDay(dateStr);
+
+    // Fetch entries for this specific day
+    try {
+      const weekStart = getMonday(new Date(dateStr));
+      const response = await fetch(`${API_BASE}/api/time?member_id=${selectedMember.id}&week_start=${weekStart}&workspace_id=${currentWorkspace.id}`);
+      const data = await response.json();
+      const entries = data.time_data
+        ?.flatMap(m => m.entries || [])
+        .filter(e => e.date === dateStr && e.member_id === selectedMember?.id) || [];
+      setSelectedDayEntries(entries);
+    } catch (error) {
+      console.error('Failed to load day entries:', error);
+      setSelectedDayEntries([]);
+    }
   };
 
   const getDayTotal = (dateStr) => {
-    return timeData
-      .flatMap(m => m.entries || [])
-      .filter(e => e.date === dateStr && e.member_id === selectedMember?.id)
-      .reduce((sum, e) => sum + Number(e.hours), 0);
+    return selectedDayEntries.reduce((sum, e) => sum + Number(e.hours), 0);
   };
 
   const getDayProjects = (dateStr) => {
-    const entries = timeData
-      .flatMap(m => m.entries || [])
-      .filter(e => e.date === dateStr && e.member_id === selectedMember?.id);
     const grouped = {};
-    entries.forEach(e => {
+    selectedDayEntries.forEach(e => {
       const key = e.project_id || 'none';
       if (!grouped[key]) {
         grouped[key] = {
@@ -454,9 +469,7 @@ export default function TimeView({ T, currentMember, members, projects, currentW
   };
 
   const getDayEntries = (dateStr) => {
-    return timeData
-      .flatMap(m => m.entries || [])
-      .filter(e => e.date === dateStr && e.member_id === selectedMember?.id);
+    return selectedDayEntries;
   };
 
   const currentWeek = getMonday(new Date());
