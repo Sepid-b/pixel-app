@@ -1009,6 +1009,35 @@ app.delete('/api/tasks/:taskId/tags/:tagId', async (req, res) => {
   }
 });
 
+// Delete tag
+app.delete('/api/tags/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log('[DEBUG] DELETE /api/tags/:id - Deleting tag:', id);
+
+    // First remove tag from all tasks
+    const { error: deleteTaskTagsError } = await supabaseAdmin
+      .from('px_task_tags')
+      .delete()
+      .eq('tag_id', id);
+
+    if (deleteTaskTagsError) throw deleteTaskTagsError;
+
+    // Then delete the tag
+    const { error } = await supabaseAdmin
+      .from('px_tags')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+    console.log('[DEBUG] DELETE /api/tags/:id - Deleted tag');
+    res.json({ success: true });
+  } catch (error) {
+    logError('DELETE /api/tags/:id', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ==================== TASK COLLABORATORS ENDPOINTS ====================
 
 // Get collaborators for a task

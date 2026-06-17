@@ -2414,33 +2414,83 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
               minHeight: '28px'
             }}>
               {tags.filter(tag => !localTaskTags.some(t => t.id === tag.id)).map(tag => (
-                <button
+                <div
                   key={tag.id}
-                  onClick={() => handleToggleTag(tag.id)}
                   style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
                     padding: '4px 8px',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    position: 'relative',
                     background: theme.background,
                     border: `0.5px solid ${theme.border}`,
-                    borderRadius: '4px',
-                    color: theme.textSecondary,
-                    fontSize: '11px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    transform: 'scale(1)'
+                    transition: 'all 0.15s ease'
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.background = theme.surfaceHover;
-                    e.currentTarget.style.color = theme.text;
-                    e.currentTarget.style.transform = 'scale(1.05)';
+                    const delBtn = e.currentTarget.querySelector('.tag-del');
+                    if (delBtn) delBtn.style.opacity = '1';
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.background = theme.background;
-                    e.currentTarget.style.color = theme.textSecondary;
-                    e.currentTarget.style.transform = 'scale(1)';
+                    const delBtn = e.currentTarget.querySelector('.tag-del');
+                    if (delBtn) delBtn.style.opacity = '0';
                   }}
                 >
-                  {tag.name}
-                </button>
+                  <div
+                    onClick={() => handleToggleTag(tag.id)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      flex: 1
+                    }}
+                  >
+                    <div style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      background: tag.color,
+                      flexShrink: 0
+                    }} />
+                    <span style={{
+                      fontSize: 11,
+                      color: theme.textSecondary
+                    }}>
+                      {tag.name}
+                    </span>
+                  </div>
+                  <div
+                    className="tag-del"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      if (!window.confirm(`Delete tag "${tag.name}"? It will be removed from all tasks.`)) return;
+                      try {
+                        await fetch(`${import.meta.env.VITE_API_URL || ''}/api/tags/${tag.id}`, {
+                          method: 'DELETE'
+                        });
+                        setTags(prev => prev.filter(t => t.id !== tag.id));
+                      } catch (error) {
+                        console.error('Failed to delete tag:', error);
+                      }
+                    }}
+                    style={{
+                      opacity: 0,
+                      transition: 'opacity 0.15s',
+                      fontSize: 12,
+                      color: '#e74c3c',
+                      cursor: 'pointer',
+                      padding: '2px 4px',
+                      borderRadius: 4,
+                      flexShrink: 0,
+                      fontWeight: 'bold'
+                    }}
+                  >
+                    ✕
+                  </div>
+                </div>
               ))}
 
               {/* New tag button */}
