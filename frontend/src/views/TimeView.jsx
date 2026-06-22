@@ -11,7 +11,13 @@ function getMonday(date) {
   return monday.toISOString().split('T')[0];
 }
 
-const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart }) => {
+// Convert JavaScript getDay() (0=Sunday) to grid row index (0=Monday)
+function getDayIndex(date) {
+  const day = date.getDay();
+  return day === 0 ? 6 : day - 1; // Sun=6, Mon=0, Tue=1, ..., Sat=5
+}
+
+const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasNavigated }) => {
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   // Map data by date string
@@ -163,14 +169,19 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart }) =>
   };
 
   const buildCols = () => {
+    // Start from Monday of the first week
+    const firstMonday = new Date(getMonday(startDate));
+
     return Array.from({ length: numWeeks }, (_, w) => ({
-      cells: Array.from({ length: 7 }, (_, d) => {
-        const date = new Date(startDate);
-        date.setDate(startDate.getDate() + w * 7 + d);
+      cells: Array.from({ length: 7 }, (_, dayIndex) => {
+        // dayIndex: 0=Mon, 1=Tue, ..., 6=Sun
+        const date = new Date(firstMonday);
+        date.setDate(firstMonday.getDate() + w * 7 + dayIndex);
         const dateStr = date.toISOString().split('T')[0];
         const hours = hoursMap[dateStr] || 0;
-        const isWeekend = d >= 5;
-        return { dateStr, hours, isWeekend };
+        const isWeekend = dayIndex >= 5; // Sat=5, Sun=6
+        const isToday = dateStr === new Date().toISOString().split('T')[0];
+        return { dateStr, hours, isWeekend, isToday };
       })
     }));
   };
@@ -204,6 +215,12 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart }) =>
               {col.cells.map((cell, di) => {
                 const isSelected = selectedDay === cell.dateStr;
                 const inSelectedWeek = isInSelectedWeek(cell.dateStr);
+                const showWeekOutline = hasNavigated && inSelectedWeek;
+
+                // White ring for today
+                const todayRing = cell.isToday ? `0 0 0 1px ${T.bg2 || T.background}, 0 0 0 2px white` : 'none';
+                const selectedRing = isSelected ? `0 0 0 2px ${T.bg2 || T.background}, 0 0 0 3px #7c6bf0` : todayRing;
+
                 return (
                   <div
                     key={di}
@@ -216,8 +233,8 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart }) =>
                       cursor: 'pointer',
                       transition: 'all 0.1s',
                       flexShrink: 0,
-                      boxShadow: isSelected ? `0 0 0 2px ${T.bg2 || T.background}, 0 0 0 3px #7c6bf0` : 'none',
-                      outline: inSelectedWeek ? '1.5px solid rgba(124,107,240,0.6)' : 'none',
+                      boxShadow: selectedRing,
+                      outline: showWeekOutline ? '1.5px solid rgba(124,107,240,0.6)' : 'none',
                       outlineOffset: '1px'
                     }}
                     onMouseEnter={e => !isSelected && (e.currentTarget.style.transform = 'scale(1.15)')}
@@ -276,6 +293,7 @@ export default function TimeView({ T, currentMember, members, projects, currentW
   const [heatmapData, setHeatmapData] = useState([]);
   const [heatmapPeriod, setHeatmapPeriod] = useState('daily');
   const [selectedDayEntries, setSelectedDayEntries] = useState([]);
+  const [hasNavigated, setHasNavigated] = useState(false);
 
   useEffect(() => {
     if (currentMember && currentWorkspace) {
@@ -451,6 +469,9 @@ export default function TimeView({ T, currentMember, members, projects, currentW
     }
 
     setWeekStart(newWeekStart);
+
+    // Update hasNavigated based on whether we're at current week
+    setHasNavigated(newWeekStart !== currentMonday);
   };
 
   const formatWeekRange = () => {
@@ -685,6 +706,7 @@ export default function TimeView({ T, currentMember, members, projects, currentW
             selectedDay={selectedDay}
             onDayClick={handleDayClick}
             weekStart={weekStart}
+            hasNavigated={hasNavigated}
           />
         </div>
       </div>
