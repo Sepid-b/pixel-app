@@ -158,11 +158,10 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
     return d;
   };
 
-  let cols, monthLabels, cellHeight, cellWidth;
+  let cols, monthLabels, cellHeight;
 
   if (period === 'monthly') {
     cellHeight = 22;
-    cellWidth = 20;
     const year = today.getFullYear();
     const month = today.getMonth();
     const firstDay = new Date(year, month, 1);
@@ -196,7 +195,6 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
   } else {
     // Annually view
     cellHeight = 14;
-    cellWidth = 10;
     const jan1 = new Date(today.getFullYear(), 0, 1);
     const gridStart = getMondayOf(jan1);
     const numWeeks = 53;
@@ -249,11 +247,10 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
 
   return (
     <div style={{ width: '100%' }}>
-      <div style={{ display: 'flex', paddingLeft: 30, marginBottom: 5, position: 'relative', height: 16 }}>
+      <div style={{ display: 'flex', paddingLeft: 30, marginBottom: 5 }}>
         {monthLabels.map((ml, i) => (
           <div key={i} style={{
-            position: 'absolute',
-            left: 30 + ml.col * (cellWidth + 2),
+            flex: i === monthLabels.length - 1 ? `0 0 ${((cols.length - ml.col) / cols.length) * 100}%` : `0 0 ${((monthLabels[i + 1]?.col || cols.length) - ml.col) / cols.length * 100}%`,
             fontSize: 9,
             color: T.textTertiary
           }}>
@@ -262,7 +259,7 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
         ))}
       </div>
 
-      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', overflowY: 'visible' }}>
+      <div style={{ display: 'flex', gap: 2, overflowX: 'auto', overflowY: 'visible' }}>
         <div style={{ display: 'flex', flexDirection: 'column', width: 24, flexShrink: 0, gap: 2, paddingTop: 1 }}>
           {dayLabels.map((d, i) => (
             <div key={d} style={{
@@ -274,7 +271,7 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
 
         <div style={{ display: 'flex', gap: 2, flex: 1 }}>
           {cols.map((col, wi) => (
-            <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0, width: cellWidth }}>
+            <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
               {col.cells.map((cell, di) => {
                 const isSelected = selectedDay === cell.dateStr;
                 const inSelectedWeek = isInSelectedWeek(cell.dateStr);
