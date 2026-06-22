@@ -11,20 +11,24 @@ function getMonday(date) {
   return monday.toISOString().split('T')[0];
 }
 
-const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick }) => {
+const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart }) => {
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
   // Map data by date string
   const hoursMap = {};
   data.forEach(d => { hoursMap[d.date] = d.hours; });
 
+  // Helper to check if date is in selected week
+  const isInSelectedWeek = (dateStr) => {
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    return dateStr >= weekStart && dateStr <= weekEnd.toISOString().split('T')[0];
+  };
+
   // Daily view — special handling with stacked rectangles
   if (period === 'daily') {
-    const today = new Date();
-    const monday = new Date(today);
-    const day = today.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    monday.setDate(today.getDate() + diff);
+    // Use weekStart from props to show the selected week
+    const monday = new Date(weekStart);
 
     const past7 = Array.from({ length: 7 }, (_, i) => {
       const d = new Date(monday);
@@ -199,6 +203,7 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick }) => {
             <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
               {col.cells.map((cell, di) => {
                 const isSelected = selectedDay === cell.dateStr;
+                const inSelectedWeek = isInSelectedWeek(cell.dateStr);
                 return (
                   <div
                     key={di}
@@ -211,7 +216,9 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick }) => {
                       cursor: 'pointer',
                       transition: 'all 0.1s',
                       flexShrink: 0,
-                      boxShadow: isSelected ? `0 0 0 2px ${T.bg2 || T.background}, 0 0 0 3px #7c6bf0` : 'none'
+                      boxShadow: isSelected ? `0 0 0 2px ${T.bg2 || T.background}, 0 0 0 3px #7c6bf0` : 'none',
+                      outline: inSelectedWeek ? '1.5px solid rgba(124,107,240,0.6)' : 'none',
+                      outlineOffset: '1px'
                     }}
                     onMouseEnter={e => !isSelected && (e.currentTarget.style.transform = 'scale(1.15)')}
                     onMouseLeave={e => !isSelected && (e.currentTarget.style.transform = 'scale(1)')}
@@ -283,6 +290,25 @@ export default function TimeView({ T, currentMember, members, projects, currentW
     if (!selectedMember) return;
     loadHeatmap(selectedMember.id);
   }, [selectedMember]);
+
+  // Update form date when weekStart changes
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    const weekEndStr = weekEnd.toISOString().split('T')[0];
+
+    // If current week → use today, else use the Friday of that week
+    const isCurrentWeek = today >= weekStart && today <= weekEndStr;
+    if (isCurrentWeek) {
+      setForm(prev => ({ ...prev, date: today }));
+    } else {
+      // Use Friday of the selected week
+      const friday = new Date(weekStart);
+      friday.setDate(friday.getDate() + 4);
+      setForm(prev => ({ ...prev, date: friday.toISOString().split('T')[0] }));
+    }
+  }, [weekStart]);
 
   const loadTimeData = async () => {
     if (!currentWorkspace) return;
@@ -416,7 +442,15 @@ export default function TimeView({ T, currentMember, members, projects, currentW
   const navigateWeek = (direction) => {
     const current = new Date(weekStart);
     current.setDate(current.getDate() + (direction * 7));
-    setWeekStart(getMonday(current));
+    const newWeekStart = getMonday(current);
+
+    // Don't go past current week
+    const currentMonday = getMonday(new Date());
+    if (direction > 0 && newWeekStart > currentMonday) {
+      return;
+    }
+
+    setWeekStart(newWeekStart);
   };
 
   const formatWeekRange = () => {
@@ -650,6 +684,7 @@ export default function TimeView({ T, currentMember, members, projects, currentW
             T={T}
             selectedDay={selectedDay}
             onDayClick={handleDayClick}
+            weekStart={weekStart}
           />
         </div>
       </div>
@@ -878,6 +913,12 @@ export default function TimeView({ T, currentMember, members, projects, currentW
               <input
                 type="date"
                 value={form.date}
+                min={weekStart}
+                max={(() => {
+                  const end = new Date(weekStart);
+                  end.setDate(end.getDate() + 6);
+                  return end.toISOString().split('T')[0];
+                })()}
                 onChange={(e) => setForm({ ...form, date: e.target.value })}
                 onClick={(e) => {
                   try {
