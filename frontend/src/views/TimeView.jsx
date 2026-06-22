@@ -274,7 +274,7 @@ export default function TimeView({ T, currentMember, members, projects, currentW
   const [tasks, setTasks] = useState([]);
   const [saving, setSaving] = useState(false);
   const [heatmapData, setHeatmapData] = useState([]);
-  const [heatmapPeriod, setHeatmapPeriod] = useState('annually');
+  const [heatmapPeriod, setHeatmapPeriod] = useState('daily');
   const [selectedDayEntries, setSelectedDayEntries] = useState([]);
 
   useEffect(() => {
