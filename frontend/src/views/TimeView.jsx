@@ -140,20 +140,85 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
 
   // Monthly and Annually views
   const today = new Date();
-  let startDate, numWeeks, topLabels, cellHeight;
+  today.setHours(0, 0, 0, 0);
+  const todayStr = today.toISOString().split('T')[0];
+
+  // Helper to get Monday of a given date's week
+  const getMondayOf = (date) => {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const day = d.getDay(); // 0=Sun, 1=Mon...6=Sat
+    const diff = day === 0 ? -6 : 1 - day; // how many days back to Monday
+    d.setDate(d.getDate() + diff);
+    return d;
+  };
+
+  let cols, monthLabels, cellHeight, cellWidth;
 
   if (period === 'monthly') {
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-    startDate = firstDay;
-    numWeeks = 5;
     cellHeight = 22;
-    topLabels = ['Week 1', 'Week 2', 'Week 3', 'Week 4', 'Week 5'];
+    cellWidth = 20;
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    const firstMonday = getMondayOf(firstDay);
+    const numWeeks = 5;
+
+    cols = Array.from({ length: numWeeks }, (_, w) => ({
+      cells: Array.from({ length: 7 }, (_, dayIndex) => {
+        const cellDate = new Date(firstMonday);
+        cellDate.setDate(firstMonday.getDate() + w * 7 + dayIndex);
+        const isCurrentMonth = cellDate.getMonth() === today.getMonth();
+        const dateStr = cellDate.toISOString().split('T')[0];
+        const hours = isCurrentMonth ? (hoursMap[dateStr] || 0) : 0;
+        const isWeekend = dayIndex >= 5;
+        const isToday = dateStr === todayStr;
+        return { dateStr, hours, isWeekend, isToday, isCurrentMonth };
+      })
+    }));
+
+    monthLabels = [
+      { label: 'Week 1', col: 0 },
+      { label: 'Week 2', col: 1 },
+      { label: 'Week 3', col: 2 },
+      { label: 'Week 4', col: 3 },
+      { label: 'Week 5', col: 4 }
+    ];
   } else {
-    const yearStart = new Date(today.getFullYear(), 0, 1);
-    startDate = yearStart;
-    numWeeks = 52;
+    // Annually view
     cellHeight = 14;
-    topLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    cellWidth = 10;
+    const jan1 = new Date(today.getFullYear(), 0, 1);
+    const gridStart = getMondayOf(jan1);
+    const numWeeks = 53;
+
+    cols = Array.from({ length: numWeeks }, (_, w) => ({
+      cells: Array.from({ length: 7 }, (_, dayIndex) => {
+        const cellDate = new Date(gridStart);
+        cellDate.setDate(gridStart.getDate() + w * 7 + dayIndex);
+        const isCurrentYear = cellDate.getFullYear() === today.getFullYear();
+        const dateStr = cellDate.toISOString().split('T')[0];
+        const hours = isCurrentYear ? (hoursMap[dateStr] || 0) : 0;
+        const isWeekend = dayIndex >= 5;
+        const isToday = dateStr === todayStr;
+        return { dateStr, hours, isWeekend, isToday, isCurrentYear };
+      })
+    }));
+
+    // Generate month labels based on which column each month starts in
+    monthLabels = [];
+    let currentMonth = -1;
+    cols.forEach((week, w) => {
+      const firstDayOfWeek = week.cells[0]; // Monday of this week
+      if (firstDayOfWeek.isCurrentYear) {
+        const month = new Date(firstDayOfWeek.dateStr).getMonth();
+        if (month !== currentMonth) {
+          monthLabels.push({
+            label: new Date(firstDayOfWeek.dateStr).toLocaleDateString('en-US', { month: 'short' }),
+            col: w
+          });
+          currentMonth = month;
+        }
+      }
+    });
   }
 
   const maxHours = Math.max(...Object.values(hoursMap), 8);
@@ -168,34 +233,21 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
     return '#7c6bf0';
   };
 
-  const buildCols = () => {
-    // Start from Monday of the first week
-    const firstMonday = new Date(getMonday(startDate));
-
-    return Array.from({ length: numWeeks }, (_, w) => ({
-      cells: Array.from({ length: 7 }, (_, dayIndex) => {
-        // dayIndex: 0=Mon, 1=Tue, ..., 6=Sun
-        const date = new Date(firstMonday);
-        date.setDate(firstMonday.getDate() + w * 7 + dayIndex);
-        const dateStr = date.toISOString().split('T')[0];
-        const hours = hoursMap[dateStr] || 0;
-        const isWeekend = dayIndex >= 5; // Sat=5, Sun=6
-        const isToday = dateStr === new Date().toISOString().split('T')[0];
-        return { dateStr, hours, isWeekend, isToday };
-      })
-    }));
-  };
-
-  const cols = buildCols();
-  const labelEvery = Math.floor(numWeeks / topLabels.length);
   const totalHours = Object.values(hoursMap).reduce((a, b) => a + b, 0);
   const bestEntry = Object.entries(hoursMap).sort((a, b) => b[1] - a[1])[0];
 
   return (
     <div style={{ width: '100%' }}>
-      <div style={{ display: 'flex', paddingLeft: 30, marginBottom: 5 }}>
-        {topLabels.map((l, i) => (
-          <div key={i} style={{ flex: labelEvery, fontSize: 9, color: T.textTertiary }}>{l}</div>
+      <div style={{ display: 'flex', paddingLeft: 30, marginBottom: 5, position: 'relative', height: 16 }}>
+        {monthLabels.map((ml, i) => (
+          <div key={i} style={{
+            position: 'absolute',
+            left: 30 + ml.col * (cellWidth + 2),
+            fontSize: 9,
+            color: T.textTertiary
+          }}>
+            {ml.label}
+          </div>
         ))}
       </div>
 
@@ -211,34 +263,32 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
 
         <div style={{ display: 'flex', gap: 2, flex: 1 }}>
           {cols.map((col, wi) => (
-            <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+            <div key={wi} style={{ display: 'flex', flexDirection: 'column', gap: 2, flexShrink: 0, width: cellWidth }}>
               {col.cells.map((cell, di) => {
                 const isSelected = selectedDay === cell.dateStr;
                 const inSelectedWeek = isInSelectedWeek(cell.dateStr);
                 const showWeekOutline = hasNavigated && inSelectedWeek;
-
-                // White ring for today
-                const todayRing = cell.isToday ? `0 0 0 1px ${T.bg2 || T.background}, 0 0 0 2px white` : 'none';
-                const selectedRing = isSelected ? `0 0 0 2px ${T.bg2 || T.background}, 0 0 0 3px #7c6bf0` : todayRing;
+                const isInPeriod = period === 'monthly' ? cell.isCurrentMonth : cell.isCurrentYear;
 
                 return (
                   <div
                     key={di}
-                    onClick={() => onDayClick(cell.dateStr)}
-                    title={`${cell.dateStr}: ${cell.hours}h`}
+                    onClick={() => isInPeriod && cell.hours > 0 ? onDayClick(cell.dateStr) : null}
+                    title={isInPeriod ? `${cell.dateStr}: ${cell.hours}h` : ''}
                     style={{
-                      height: cellHeight, borderRadius: 3,
-                      background: getColor(cell.hours, cell.isWeekend),
-                      opacity: cell.isWeekend ? 0.4 : 1,
-                      cursor: 'pointer',
-                      transition: 'all 0.1s',
-                      flexShrink: 0,
-                      boxShadow: selectedRing,
-                      outline: showWeekOutline ? '1.5px solid rgba(124,107,240,0.6)' : 'none',
-                      outlineOffset: '1px'
+                      height: cellHeight,
+                      borderRadius: 3,
+                      background: !isInPeriod ? 'transparent' : getColor(cell.hours, cell.isWeekend),
+                      opacity: !isInPeriod ? 0 : cell.isWeekend ? 0.35 : 1,
+                      boxShadow: cell.isToday && isInPeriod ? '0 0 0 1.5px rgba(255,255,255,0.8)' : isSelected ? `0 0 0 2px ${T.bg2 || T.background}, 0 0 0 3px #7c6bf0` : 'none',
+                      outline: showWeekOutline && isInPeriod ? '1.5px solid rgba(124,107,240,0.6)' : 'none',
+                      outlineOffset: '1px',
+                      cursor: isInPeriod && cell.hours > 0 ? 'pointer' : 'default',
+                      transition: 'transform 0.1s',
+                      flexShrink: 0
                     }}
-                    onMouseEnter={e => !isSelected && (e.currentTarget.style.transform = 'scale(1.15)')}
-                    onMouseLeave={e => !isSelected && (e.currentTarget.style.transform = 'scale(1)')}
+                    onMouseEnter={e => isInPeriod && !isSelected && cell.hours > 0 && (e.currentTarget.style.transform = 'scale(1.15)')}
+                    onMouseLeave={e => isInPeriod && !isSelected && (e.currentTarget.style.transform = 'scale(1)')}
                   />
                 );
               })}
