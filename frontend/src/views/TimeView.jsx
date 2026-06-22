@@ -141,12 +141,17 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
   // Monthly and Annually views
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const todayStr = today.toISOString().split('T')[0];
 
-  // Helper to get Monday of a given date's week
+  // Helper to convert date to local date string (avoids timezone shifts)
+  const pad = (n) => String(n).padStart(2, '0');
+  const toLocalDateStr = (date) =>
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+
+  const todayStr = toLocalDateStr(today);
+
+  // Helper to get Monday of a given date's week (using local dates to avoid timezone issues)
   const getMondayOf = (date) => {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
+    const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
     const day = d.getDay(); // 0=Sun, 1=Mon...6=Sat
     const diff = day === 0 ? -6 : 1 - day; // how many days back to Monday
     d.setDate(d.getDate() + diff);
@@ -158,30 +163,36 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
   if (period === 'monthly') {
     cellHeight = 22;
     cellWidth = 20;
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
-    const firstMonday = getMondayOf(firstDay);
-    const numWeeks = 5;
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const gridStart = getMondayOf(firstDay);
+    const endMonday = getMondayOf(lastDay);
+    const weekDiff = Math.ceil((endMonday - gridStart) / (7 * 24 * 60 * 60 * 1000)) + 1;
+    const numWeeks = Math.max(weekDiff, 4);
 
     cols = Array.from({ length: numWeeks }, (_, w) => ({
       cells: Array.from({ length: 7 }, (_, dayIndex) => {
-        const cellDate = new Date(firstMonday);
-        cellDate.setDate(firstMonday.getDate() + w * 7 + dayIndex);
-        const isCurrentMonth = cellDate.getMonth() === today.getMonth();
-        const dateStr = cellDate.toISOString().split('T')[0];
-        const hours = isCurrentMonth ? (hoursMap[dateStr] || 0) : 0;
+        const cellDate = new Date(gridStart);
+        cellDate.setDate(gridStart.getDate() + w * 7 + dayIndex);
+        const dateStr = toLocalDateStr(cellDate);
+        const inMonth = cellDate.getMonth() === month;
+        const hours = inMonth ? (hoursMap[dateStr] || 0) : 0;
         const isWeekend = dayIndex >= 5;
         const isToday = dateStr === todayStr;
-        return { dateStr, hours, isWeekend, isToday, isCurrentMonth };
+        return { dateStr, hours, isWeekend, isToday, inMonth };
       })
     }));
 
-    monthLabels = [
-      { label: 'Week 1', col: 0 },
-      { label: 'Week 2', col: 1 },
-      { label: 'Week 3', col: 2 },
-      { label: 'Week 4', col: 3 },
-      { label: 'Week 5', col: 4 }
-    ];
+    // Generate week labels with Monday dates
+    monthLabels = cols.map((week, i) => {
+      const monday = new Date(week.cells[0].dateStr);
+      return {
+        label: monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        col: i
+      };
+    });
   } else {
     // Annually view
     cellHeight = 14;
@@ -195,7 +206,7 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
         const cellDate = new Date(gridStart);
         cellDate.setDate(gridStart.getDate() + w * 7 + dayIndex);
         const isCurrentYear = cellDate.getFullYear() === today.getFullYear();
-        const dateStr = cellDate.toISOString().split('T')[0];
+        const dateStr = toLocalDateStr(cellDate);
         const hours = isCurrentYear ? (hoursMap[dateStr] || 0) : 0;
         const isWeekend = dayIndex >= 5;
         const isToday = dateStr === todayStr;
@@ -268,7 +279,7 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
                 const isSelected = selectedDay === cell.dateStr;
                 const inSelectedWeek = isInSelectedWeek(cell.dateStr);
                 const showWeekOutline = hasNavigated && inSelectedWeek;
-                const isInPeriod = period === 'monthly' ? cell.isCurrentMonth : cell.isCurrentYear;
+                const isInPeriod = period === 'monthly' ? cell.inMonth : cell.isCurrentYear;
 
                 return (
                   <div
@@ -278,8 +289,8 @@ const HeatmapGrid = ({ period, data, T, selectedDay, onDayClick, weekStart, hasN
                     style={{
                       height: cellHeight,
                       borderRadius: 3,
-                      background: !isInPeriod ? 'transparent' : getColor(cell.hours, cell.isWeekend),
-                      opacity: !isInPeriod ? 0 : cell.isWeekend ? 0.35 : 1,
+                      background: !isInPeriod ? T.bg3 : getColor(cell.hours, cell.isWeekend),
+                      opacity: !isInPeriod ? 0.15 : cell.isWeekend ? 0.35 : 1,
                       boxShadow: cell.isToday && isInPeriod ? '0 0 0 1.5px rgba(255,255,255,0.8)' : isSelected ? `0 0 0 2px ${T.bg2 || T.background}, 0 0 0 3px #7c6bf0` : 'none',
                       outline: showWeekOutline && isInPeriod ? '1.5px solid rgba(124,107,240,0.6)' : 'none',
                       outlineOffset: '1px',

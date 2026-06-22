@@ -280,8 +280,21 @@ export default function App() {
   const setupRealtimeSubscription = () => {
     const channel = supabase
       .channel('tasks-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'px_tasks' }, () => {
-        loadTasks();
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'px_tasks' }, (payload) => {
+        // Don't refetch all tasks — just add the new one if it's not already in state
+        setTasks(prev => {
+          const exists = prev.find(t => t.id === payload.new.id);
+          if (exists) return prev;
+          return [...prev, payload.new];
+        });
+        fetchMemberTasks();
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'px_tasks' }, (payload) => {
+        setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
+        fetchMemberTasks();
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'px_tasks' }, (payload) => {
+        setTasks(prev => prev.filter(t => t.id !== payload.old.id));
         fetchMemberTasks();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'px_standups' }, () => {
