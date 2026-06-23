@@ -10,7 +10,7 @@ import ProjectsView from './views/ProjectsView';
 import TimeView from './views/TimeView';
 import MembersView from './views/MembersView';
 import WorkspaceSettings from './views/WorkspaceSettings';
-import { Sun, Moon, ChevronLeft, ChevronRight, Home, User, Calendar, Clock, Folder, FileText, Activity, Logout, Users, Briefcase, ChevronDown } from 'tabler-icons-react';
+import { Sun, Moon, ChevronLeft, ChevronRight, Home, User, Calendar, Clock, Folder, FileText, Activity, Logout, Users, Briefcase, ChevronDown, Plus, UserPlus } from 'tabler-icons-react';
 
 const themes = {
   dark: {
@@ -71,6 +71,7 @@ export default function App() {
   const [myWorkspaces, setMyWorkspaces] = useState([]);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [showWorkspaceFlow, setShowWorkspaceFlow] = useState(false);
+  const [workspaceFlowScreen, setWorkspaceFlowScreen] = useState('choose');
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [myRole, setMyRole] = useState('member');
   const [pendingCount, setPendingCount] = useState(0);
@@ -414,7 +415,7 @@ export default function App() {
 
   // Show workspace flow if user has no workspaces
   if (showWorkspaceFlow) {
-    return <WorkspaceFlow currentMember={currentMember} onComplete={handleWorkspaceComplete} />;
+    return <WorkspaceFlow currentMember={currentMember} onComplete={handleWorkspaceComplete} initialScreen={workspaceFlowScreen} />;
   }
 
   // Show workspace picker if user has multiple workspaces
@@ -1179,6 +1180,57 @@ export default function App() {
                           </div>
                         </div>
                       ))}
+
+                      {/* Divider */}
+                      <div style={{ height: '.5px', background: currentTheme.border, margin: '4px 0' }} />
+
+                      {/* Create new workspace */}
+                      <div
+                        onClick={() => {
+                          setSwitcherOpen(false);
+                          setWorkspaceFlowScreen('create');
+                          setShowWorkspaceFlow(true);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '7px 10px',
+                          borderRadius: 5,
+                          cursor: 'pointer',
+                          fontSize: 11,
+                          color: '#7c6bf0'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = currentTheme.bg3}
+                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                      >
+                        <Plus size={13} />
+                        Create new workspace
+                      </div>
+
+                      {/* Join existing workspace */}
+                      <div
+                        onClick={() => {
+                          setSwitcherOpen(false);
+                          setWorkspaceFlowScreen('join');
+                          setShowWorkspaceFlow(true);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '7px 10px',
+                          borderRadius: 5,
+                          cursor: 'pointer',
+                          fontSize: 11,
+                          color: currentTheme.textSecondary
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = currentTheme.bg3}
+                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                      >
+                        <UserPlus size={13} />
+                        Join a workspace
+                      </div>
                     </div>
                   )}
                 </div>

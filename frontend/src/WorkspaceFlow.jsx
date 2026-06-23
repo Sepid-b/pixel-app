@@ -3,13 +3,20 @@ import { supabase } from './supabaseClient';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-export default function WorkspaceFlow({ currentMember, onComplete }) {
-  const [screen, setScreen] = useState('choose');
+export default function WorkspaceFlow({ currentMember, onComplete, initialScreen }) {
+  const [screen, setScreen] = useState(initialScreen || 'choose');
   const [workspaceName, setWorkspaceName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [foundWorkspace, setFoundWorkspace] = useState(null);
   const [lookupError, setLookupError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // When initialScreen prop changes, update the screen
+  useEffect(() => {
+    if (initialScreen) {
+      setScreen(initialScreen);
+    }
+  }, [initialScreen]);
 
   // Generate preview invite code as user types
   const previewInviteCode = () => {
