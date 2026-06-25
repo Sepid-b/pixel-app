@@ -96,6 +96,13 @@ export default function App() {
     }
   }, [session]);
 
+  // Save current workspace to localStorage
+  useEffect(() => {
+    if (currentWorkspace) {
+      localStorage.setItem('currentWorkspaceId', currentWorkspace.id);
+    }
+  }, [currentWorkspace]);
+
   // Load data when workspace is selected
   useEffect(() => {
     if (currentWorkspace && currentMember) {
@@ -139,8 +146,17 @@ export default function App() {
         // One workspace → enter directly
         setCurrentWorkspace(workspaces[0].workspace);
       } else {
-        // Multiple workspaces → show picker
-        setShowWorkspacePicker(true);
+        // Multiple workspaces → check for saved workspace in localStorage
+        const savedWorkspaceId = localStorage.getItem('currentWorkspaceId');
+        const savedWorkspace = workspaces.find(w => w.workspace.id === savedWorkspaceId);
+
+        if (savedWorkspace) {
+          // Auto-select the previously used workspace
+          setCurrentWorkspace(savedWorkspace.workspace);
+        } else {
+          // No saved workspace or not found → show picker
+          setShowWorkspacePicker(true);
+        }
       }
     } catch (error) {
       console.error('Failed to identify member:', error);
