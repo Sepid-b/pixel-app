@@ -1308,6 +1308,9 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
   // Local state for instant UI updates
   const [localTaskTags, setLocalTaskTags] = useState(task.tags || []);
 
+  // Delete confirmation modal
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
   useEffect(() => {
     loadComments();
     loadDocs();
@@ -1379,10 +1382,6 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
   };
 
   const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete this task? This action cannot be undone.')) {
-      return;
-    }
-
     setSaving(true);
     setError('');
 
@@ -2648,7 +2647,7 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
 
           <div style={{ display: 'flex', gap: '8px' }}>
             <button
-              onClick={handleDelete}
+              onClick={() => setShowDeleteConfirm(true)}
               disabled={saving}
               style={{
                 flex: '0 0 auto',
@@ -2839,6 +2838,91 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
                 }}
               >
                 {savingProject ? 'Creating...' : 'Create project'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.6)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1002
+        }}
+        onClick={() => setShowDeleteConfirm(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: theme.surface,
+              borderRadius: '8px',
+              padding: '24px',
+              width: '400px',
+              border: `0.5px solid ${theme.border}`
+            }}
+          >
+            <h3 style={{
+              fontSize: '16px',
+              fontWeight: '600',
+              color: theme.text,
+              marginBottom: '12px',
+              margin: 0
+            }}>
+              Delete Task
+            </h3>
+            <p style={{
+              fontSize: '13px',
+              color: theme.textSecondary,
+              lineHeight: 1.5,
+              marginTop: '12px',
+              marginBottom: '20px'
+            }}>
+              Are you sure you want to delete "<strong>{task.title}</strong>"? This action cannot be undone.
+            </p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                style={{
+                  padding: '8px 16px',
+                  background: 'transparent',
+                  border: `0.5px solid ${theme.border}`,
+                  borderRadius: '4px',
+                  color: theme.text,
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  handleDelete();
+                }}
+                style={{
+                  padding: '8px 16px',
+                  background: '#ef4444',
+                  border: 'none',
+                  borderRadius: '4px',
+                  color: 'white',
+                  fontSize: '13px',
+                  fontWeight: '500',
+                  cursor: 'pointer'
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = '#dc2626'}
+                onMouseLeave={e => e.currentTarget.style.background = '#ef4444'}
+              >
+                Delete Task
               </button>
             </div>
           </div>
