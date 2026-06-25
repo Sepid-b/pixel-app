@@ -1378,6 +1378,24 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
     }
   };
 
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this task? This action cannot be undone.')) {
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+
+    try {
+      await api.deleteTask(task.id);
+      await onSave();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+      setSaving(false);
+    }
+  };
+
   const handleAddComment = async () => {
     if (!newComment.trim()) return;
 
@@ -2628,24 +2646,53 @@ function TaskDetailModal({ task, theme, members, projects, setProjects, tags, se
             </div>
           )}
 
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{
-              width: '100%',
-              padding: '8px',
-              background: theme.primary,
-              border: 'none',
-              borderRadius: '4px',
-              color: 'white',
-              fontSize: '13px',
-              fontWeight: '500',
-              cursor: saving ? 'not-allowed' : 'pointer',
-              opacity: saving ? 0.7 : 1
-            }}
-          >
-            {saving ? 'Saving...' : 'Save changes'}
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={handleDelete}
+              disabled={saving}
+              style={{
+                flex: '0 0 auto',
+                padding: '8px 16px',
+                background: 'transparent',
+                border: `0.5px solid #ef4444`,
+                borderRadius: '4px',
+                color: '#ef4444',
+                fontSize: '13px',
+                fontWeight: '500',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                opacity: saving ? 0.7 : 1
+              }}
+              onMouseEnter={e => {
+                if (!saving) {
+                  e.currentTarget.style.background = '#7f1d1d';
+                }
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.background = 'transparent';
+              }}
+            >
+              Delete
+            </button>
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                flex: 1,
+                padding: '8px',
+                background: theme.primary,
+                border: 'none',
+                borderRadius: '4px',
+                color: 'white',
+                fontSize: '13px',
+                fontWeight: '500',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                opacity: saving ? 0.7 : 1
+              }}
+            >
+              {saving ? 'Saving...' : 'Save changes'}
+            </button>
+          </div>
         </div>
       </div>
 
