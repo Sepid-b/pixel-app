@@ -281,17 +281,15 @@ export default function App() {
   const setupRealtimeSubscription = () => {
     const channel = supabase
       .channel('tasks-changes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'px_tasks' }, (payload) => {
-        // Don't refetch all tasks — just add the new one if it's not already in state
-        setTasks(prev => {
-          const exists = prev.find(t => t.id === payload.new.id);
-          if (exists) return prev;
-          return [...prev, payload.new];
-        });
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'px_tasks' }, async (payload) => {
+        // For INSERT, we need to fetch the full task data with joins
+        // because payload.new only has raw columns, not project_name, assignees, etc.
+        await loadTasks();
         fetchMemberTasks();
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'px_tasks' }, (payload) => {
-        setTasks(prev => prev.map(t => t.id === payload.new.id ? { ...t, ...payload.new } : t));
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'px_tasks' }, async (payload) => {
+        // For UPDATE, also refetch to get updated joined data
+        await loadTasks();
         fetchMemberTasks();
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'px_tasks' }, (payload) => {
