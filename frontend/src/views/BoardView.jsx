@@ -505,6 +505,7 @@ export default function BoardView({ tasks, members, projects, setProjects, curre
           members={members}
           projects={projects}
           currentMember={currentMember}
+          currentWorkspace={currentWorkspace}
           onClose={() => setShowNewTaskModal(false)}
           onSave={onTasksChange}
         />
@@ -894,7 +895,7 @@ function Dropdown({ label, value, onChange, options, theme }) {
   );
 }
 
-function NewTaskModal({ theme, members, projects, currentMember, onClose, onSave }) {
+function NewTaskModal({ theme, members, projects, currentMember, currentWorkspace, onClose, onSave }) {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -904,7 +905,8 @@ function NewTaskModal({ theme, members, projects, currentMember, onClose, onSave
     assignees: [],
     due_date: '',
     hours: '',
-    created_by: currentMember.id
+    created_by: currentMember.id,
+    workspace_id: currentWorkspace?.id
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
